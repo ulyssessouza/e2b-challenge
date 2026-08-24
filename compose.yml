@@ -19,8 +19,7 @@
 # **Test user** (demo login page): `foo@bar.com` / `foobar`
 #
 # Access tokens are **JWTs** (RS256) — validate them in your service against
-# Hydra's JWKS at `http://localhost:4444/.well-known/jwks.json` (issuer
-# `http://localhost:4444`).
+# Hydra's JWKS at `http://localhost:4444/.well-known/jwks.json` (issuer `http://localhost:4444`).
 #
 # Hydra is a fixture, not part of the exercise — you only implement the client
 # side of the authorization-code flow and the token validation in your service. If your service doesn't

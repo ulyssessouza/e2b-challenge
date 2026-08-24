@@ -28,6 +28,7 @@ type Sandbox struct {
 	Status    string
 	CreatedAt time.Time
 	StoppedAt sql.NullTime
+	Version   int32
 }
 
 type User struct {

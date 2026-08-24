@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -17,7 +18,7 @@ func ProjectMembership(q *db.Queries) echo.MiddlewareFunc {
 
 			_, err := q.GetProjectByID(c.Request().Context(), projectID)
 			if err != nil {
-				if err == sql.ErrNoRows {
+				if errors.Is(err, sql.ErrNoRows) {
 					return echo.NewHTTPError(http.StatusNotFound, "project not found")
 				}
 				return echo.NewHTTPError(http.StatusInternalServerError, "database error")
@@ -28,7 +29,7 @@ func ProjectMembership(q *db.Queries) echo.MiddlewareFunc {
 				UserID:    userID,
 			})
 			if err != nil {
-				if err == sql.ErrNoRows {
+				if errors.Is(err, sql.ErrNoRows) {
 					return echo.NewHTTPError(http.StatusForbidden, "not a member of this project")
 				}
 				return echo.NewHTTPError(http.StatusInternalServerError, "database error")

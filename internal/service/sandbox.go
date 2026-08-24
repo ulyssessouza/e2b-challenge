@@ -67,11 +67,30 @@ func (s *SandboxService) Stop(ctx context.Context, sandboxID, userID string) err
 		return fmt.Errorf("checking membership: %w", err)
 	}
 
-	if err := s.q.UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
-		ID:     sandboxID,
-		Status: "stopped",
-	}); err != nil {
+	if sandbox.Status == "stopped" {
+		return fmt.Errorf("sandbox already stopped")
+	}
+
+	rows, err := s.q.UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
+		ID:      sandboxID,
+		Status:  "stopped",
+		Version: sandbox.Version,
+	})
+	if err != nil {
 		return fmt.Errorf("stopping sandbox: %w", err)
+	}
+
+	if rows == 0 {
+		// Version mismatch — concurrent modification
+		// Re-read to give the client useful feedback
+		updated, err := s.q.GetSandboxByID(ctx, sandboxID)
+		if err != nil {
+			return fmt.Errorf("conflict stopping sandbox: %w", err)
+		}
+		if updated.Status == "stopped" {
+			return fmt.Errorf("sandbox already stopped")
+		}
+		return fmt.Errorf("sandbox was modified concurrently, try again")
 	}
 
 	return nil

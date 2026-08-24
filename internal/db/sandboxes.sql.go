@@ -21,7 +21,7 @@ func (q *Queries) CountSandboxesByProject(ctx context.Context, projectID string)
 }
 
 const createSandbox = `-- name: CreateSandbox :one
-INSERT INTO sandboxes (project_id, user_id) VALUES ($1, $2) RETURNING id, project_id, user_id, status, created_at, stopped_at
+INSERT INTO sandboxes (project_id, user_id) VALUES ($1, $2) RETURNING id, project_id, user_id, status, created_at, stopped_at, version
 `
 
 type CreateSandboxParams struct {
@@ -39,12 +39,13 @@ func (q *Queries) CreateSandbox(ctx context.Context, arg CreateSandboxParams) (S
 		&i.Status,
 		&i.CreatedAt,
 		&i.StoppedAt,
+		&i.Version,
 	)
 	return i, err
 }
 
 const getSandboxByID = `-- name: GetSandboxByID :one
-SELECT id, project_id, user_id, status, created_at, stopped_at FROM sandboxes WHERE id = $1 LIMIT 1
+SELECT id, project_id, user_id, status, created_at, stopped_at, version FROM sandboxes WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetSandboxByID(ctx context.Context, id string) (Sandbox, error) {
@@ -57,12 +58,13 @@ func (q *Queries) GetSandboxByID(ctx context.Context, id string) (Sandbox, error
 		&i.Status,
 		&i.CreatedAt,
 		&i.StoppedAt,
+		&i.Version,
 	)
 	return i, err
 }
 
 const listSandboxesByProject = `-- name: ListSandboxesByProject :many
-SELECT id, project_id, user_id, status, created_at, stopped_at FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC
+SELECT id, project_id, user_id, status, created_at, stopped_at, version FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
 `
 
@@ -88,6 +90,7 @@ func (q *Queries) ListSandboxesByProject(ctx context.Context, arg ListSandboxesB
 			&i.Status,
 			&i.CreatedAt,
 			&i.StoppedAt,
+			&i.Version,
 		); err != nil {
 			return nil, err
 		}
@@ -102,16 +105,20 @@ func (q *Queries) ListSandboxesByProject(ctx context.Context, arg ListSandboxesB
 	return items, nil
 }
 
-const updateSandboxStatus = `-- name: UpdateSandboxStatus :exec
-UPDATE sandboxes SET status = $2, stopped_at = now() WHERE id = $1
+const updateSandboxStatus = `-- name: UpdateSandboxStatus :execrows
+UPDATE sandboxes SET status = $2, stopped_at = now(), version = version + 1 WHERE id = $1 AND version = $3
 `
 
 type UpdateSandboxStatusParams struct {
-	ID     string
-	Status string
+	ID      string
+	Status  string
+	Version int32
 }
 
-func (q *Queries) UpdateSandboxStatus(ctx context.Context, arg UpdateSandboxStatusParams) error {
-	_, err := q.db.ExecContext(ctx, updateSandboxStatus, arg.ID, arg.Status)
-	return err
+func (q *Queries) UpdateSandboxStatus(ctx context.Context, arg UpdateSandboxStatusParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateSandboxStatus, arg.ID, arg.Status, arg.Version)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

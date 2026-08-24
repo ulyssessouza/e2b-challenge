@@ -11,5 +11,5 @@ LIMIT $2 OFFSET $3;
 -- name: CountSandboxesByProject :one
 SELECT COUNT(*) FROM sandboxes WHERE project_id = $1;
 
--- name: UpdateSandboxStatus :exec
-UPDATE sandboxes SET status = $2, stopped_at = now() WHERE id = $1;
+-- name: UpdateSandboxStatus :execrows
+UPDATE sandboxes SET status = $2, stopped_at = now(), version = version + 1 WHERE id = $1 AND version = $3;

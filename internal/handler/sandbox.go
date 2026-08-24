@@ -55,6 +55,12 @@ func (h *SandboxHandler) Stop(c echo.Context) error {
 		if strings.Contains(err.Error(), "not a member") {
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
+		if strings.Contains(err.Error(), "already stopped") {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
+		if strings.Contains(err.Error(), "conflict") {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
