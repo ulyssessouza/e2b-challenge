@@ -1,0 +1,131 @@
+# ## What's running
+#
+# | Service | URL | Notes |
+# |---|---|---|
+# | PostgreSQL | `postgres://e2b:e2b@localhost:5432/e2b` | your application database |
+# | Redis | `localhost:6379` | no auth |
+# | Ory Hydra (public) | `http://localhost:4444` | `/oauth2/auth`, `/oauth2/token`, `/userinfo`, `/.well-known/openid-configuration`, `/.well-known/jwks.json` |
+# | Ory Hydra (admin) | `http://localhost:4445` | used by the consent app; you shouldn't need it |
+# | Demo login page | `http://localhost:3000` | Hydra's reference login/consent UI |
+#
+# ## OAuth2 client (pre-created for you)
+# | | |
+# |---|---|
+# | Client ID | `e2b-assignment` |
+# | Client secret | `e2b-assignment-secret` |
+# | Redirect URI | `http://localhost:8080/auth/callback` |
+# | Scopes | `openid offline` |
+#
+# **Test user** (demo login page): `foo@bar.com` / `foobar`
+#
+# Access tokens are **JWTs** (RS256) — validate them in your service against
+# Hydra's JWKS at `http://localhost:4444/.well-known/jwks.json` (issuer
+# `http://localhost:4444`).
+#
+# Hydra is a fixture, not part of the exercise — you only implement the client
+# side of the authorization-code flow and the token validation in your service. If your service doesn't
+# listen on `:8080` or you want a different callback path, edit the
+# `redirect_uris` in the `hydra-bootstrap` job in `docker-compose.yml` and run
+# `docker compose up hydra-bootstrap` again.
+#
+# Hydra stores its state in memory: the client is re-created automatically on
+# every `docker compose up`, and any sessions are lost when it restarts (your
+# Postgres data persists in a volume).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: e2b
+      POSTGRES_PASSWORD: e2b
+      POSTGRES_DB: e2b
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U e2b -d e2b"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  # --- OAuth2 provider (a fixture, not part of the exercise) ---------------
+  # Hydra runs with an in-memory store; the bootstrap job below re-creates
+  # the OAuth2 client on every `docker compose up`.
+  hydra:
+    image: oryd/hydra:v2.2.0
+    command: serve all --dev
+    environment:
+      DSN: memory
+      URLS_SELF_ISSUER: http://localhost:4444
+      URLS_LOGIN: http://localhost:3000/login
+      URLS_CONSENT: http://localhost:3000/consent
+      SECRETS_SYSTEM: insecure-assignment-only-system-secret
+      STRATEGIES_ACCESS_TOKEN: jwt # access tokens are JWTs, verifiable via /.well-known/jwks.json
+      LOG_LEVEL: warn
+    ports:
+      - "4444:4444" # public: /oauth2/auth, /oauth2/token, /userinfo
+      - "4445:4445" # admin (used by the consent app and the bootstrap job)
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:4445/health/ready"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  # Demo login & consent UI for Hydra.
+  # Test user: foo@bar.com / foobar
+  hydra-login-consent:
+    image: oryd/hydra-login-consent-node:v2.2.0
+    platform: linux/amd64 # no arm64 image published; runs emulated on Apple Silicon
+    environment:
+      HYDRA_ADMIN_URL: http://hydra:4445
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+    depends_on:
+      hydra:
+        condition: service_healthy
+
+  # One-shot job: creates the OAuth2 client your service will use.
+  hydra-bootstrap:
+    image: curlimages/curl:8.7.1
+    depends_on:
+      hydra:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -e
+        body='{
+          "client_id": "e2b-assignment",
+          "client_secret": "e2b-assignment-secret",
+          "client_name": "E2B Backend Assignment",
+          "grant_types": ["authorization_code", "refresh_token"],
+          "response_types": ["code"],
+          "scope": "openid offline",
+          "redirect_uris": ["http://localhost:8080/auth/callback"],
+          "token_endpoint_auth_method": "client_secret_basic"
+        }'
+        status=$$(curl -s -o /tmp/out -w '%{http_code}' \
+          -X POST http://hydra:4445/admin/clients \
+          -H 'Content-Type: application/json' \
+          -d "$$body")
+        if [ "$$status" = "201" ] || [ "$$status" = "409" ]; then
+          echo "OAuth2 client 'e2b-assignment' is ready"
+        else
+          echo "Failed to create OAuth2 client (HTTP $$status):" && cat /tmp/out && exit 1
+        fi
+volumes:
+  postgres-data:
