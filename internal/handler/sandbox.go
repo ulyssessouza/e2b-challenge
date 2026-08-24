@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"e2b-challenge/internal/middleware"
+	"e2b-challenge/internal/pagination"
 	"e2b-challenge/internal/service"
 )
 
@@ -20,13 +21,14 @@ func NewSandboxHandler(svc *service.SandboxService) *SandboxHandler {
 
 func (h *SandboxHandler) List(c echo.Context) error {
 	projectID := c.Param("id")
+	p := parsePagination(c)
 
-	sandboxes, err := h.svc.ListByProject(c.Request().Context(), projectID)
+	sandboxes, total, err := h.svc.ListByProject(c.Request().Context(), projectID, p)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	return c.JSON(http.StatusOK, sandboxes)
+	return c.JSON(http.StatusOK, pagination.NewResponse(sandboxes, p, total))
 }
 
 func (h *SandboxHandler) Create(c echo.Context) error {

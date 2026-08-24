@@ -9,6 +9,17 @@ import (
 	"context"
 )
 
+const countSandboxesByProject = `-- name: CountSandboxesByProject :one
+SELECT COUNT(*) FROM sandboxes WHERE project_id = $1
+`
+
+func (q *Queries) CountSandboxesByProject(ctx context.Context, projectID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countSandboxesByProject, projectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createSandbox = `-- name: CreateSandbox :one
 INSERT INTO sandboxes (project_id, user_id) VALUES ($1, $2) RETURNING id, project_id, user_id, status, created_at, stopped_at
 `
@@ -52,10 +63,17 @@ func (q *Queries) GetSandboxByID(ctx context.Context, id string) (Sandbox, error
 
 const listSandboxesByProject = `-- name: ListSandboxesByProject :many
 SELECT id, project_id, user_id, status, created_at, stopped_at FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
 `
 
-func (q *Queries) ListSandboxesByProject(ctx context.Context, projectID string) ([]Sandbox, error) {
-	rows, err := q.db.QueryContext(ctx, listSandboxesByProject, projectID)
+type ListSandboxesByProjectParams struct {
+	ProjectID string
+	Limit     int32
+	Offset    int32
+}
+
+func (q *Queries) ListSandboxesByProject(ctx context.Context, arg ListSandboxesByProjectParams) ([]Sandbox, error) {
+	rows, err := q.db.QueryContext(ctx, listSandboxesByProject, arg.ProjectID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

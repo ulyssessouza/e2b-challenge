@@ -24,6 +24,19 @@ func (q *Queries) AddProjectMember(ctx context.Context, arg AddProjectMemberPara
 	return err
 }
 
+const countProjectsByUser = `-- name: CountProjectsByUser :one
+SELECT COUNT(*) FROM projects p
+JOIN project_users pu ON pu.project_id = p.id
+WHERE pu.user_id = $1
+`
+
+func (q *Queries) CountProjectsByUser(ctx context.Context, userID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countProjectsByUser, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (name) VALUES ($1) RETURNING id, name, created_at
 `
@@ -101,10 +114,17 @@ SELECT p.id, p.name, p.created_at FROM projects p
 JOIN project_users pu ON pu.project_id = p.id
 WHERE pu.user_id = $1
 ORDER BY p.created_at DESC
+LIMIT $2 OFFSET $3
 `
 
-func (q *Queries) ListProjectsByUser(ctx context.Context, userID string) ([]Project, error) {
-	rows, err := q.db.QueryContext(ctx, listProjectsByUser, userID)
+type ListProjectsByUserParams struct {
+	UserID string
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListProjectsByUser(ctx context.Context, arg ListProjectsByUserParams) ([]Project, error) {
+	rows, err := q.db.QueryContext(ctx, listProjectsByUser, arg.UserID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

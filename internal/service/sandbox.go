@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"e2b-challenge/internal/db"
+	"e2b-challenge/internal/pagination"
 )
 
 type SandboxService struct {
@@ -28,12 +29,22 @@ func (s *SandboxService) Create(ctx context.Context, projectID, userID string) (
 	return &sandbox, nil
 }
 
-func (s *SandboxService) ListByProject(ctx context.Context, projectID string) ([]db.Sandbox, error) {
-	sandboxes, err := s.q.ListSandboxesByProject(ctx, projectID)
+func (s *SandboxService) ListByProject(ctx context.Context, projectID string, p pagination.Params) ([]db.Sandbox, int64, error) {
+	sandboxes, err := s.q.ListSandboxesByProject(ctx, db.ListSandboxesByProjectParams{
+		ProjectID: projectID,
+		Limit:     p.Limit,
+		Offset:    p.Offset,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("listing sandboxes: %w", err)
+		return nil, 0, fmt.Errorf("listing sandboxes: %w", err)
 	}
-	return sandboxes, nil
+
+	total, err := s.q.CountSandboxesByProject(ctx, projectID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("counting sandboxes: %w", err)
+	}
+
+	return sandboxes, total, nil
 }
 
 func (s *SandboxService) Stop(ctx context.Context, sandboxID, userID string) error {

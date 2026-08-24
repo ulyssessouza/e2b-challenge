@@ -1,0 +1,19 @@
+[tools]
+go = "1.26.2"
+sqlc = "1.31.1"
+
+[tasks]
+up = "docker compose up -d --wait"
+down = "docker compose down"
+logs = "docker compose logs -f"
+reset = "docker compose down -v && docker compose up -d --wait"
+
+db-gen = "sqlc generate"
+tidy = "go mod tidy"
+build = "go build ./..."
+test = "go test ./... -count=1"
+vet = "go vet ./..."
+run = "go run ."
+
+check = { depends = ["tidy", "vet", "build", "test"] }
+dev = { depends = ["up", "run"] }
