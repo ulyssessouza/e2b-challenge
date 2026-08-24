@@ -49,14 +49,12 @@ func main() {
 
 	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		slog.Error("failed to connect to redis", "error", err)
-		os.Exit(1)
+		slog.Warn("redis unavailable, rate limiting disabled", "error", err)
 	}
 
 	kf, err := jwks.NewProvider(ctx, cfg.HydraPublicURL+"/.well-known/jwks.json")
 	if err != nil {
-		slog.Error("failed to setup JWKS provider", "error", err)
-		os.Exit(1)
+		slog.Warn("hydra unavailable, authentication disabled", "error", err)
 	}
 
 	e := server.New(cfg, sqlDB, rdb, kf)

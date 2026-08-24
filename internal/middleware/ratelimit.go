@@ -1,12 +1,20 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/redis/go-redis/v9"
 )
+
+var redisDown atomic.Bool
+
+func RedisDown() bool {
+	return redisDown.Load()
+}
 
 func RateLimiter(rdb *redis.Client, limit int) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -23,8 +31,11 @@ func RateLimiter(rdb *redis.Client, limit int) echo.MiddlewareFunc {
 
 			count, err := rdb.Incr(ctx, key).Result()
 			if err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, "rate limiter error")
+				redisDown.Store(true)
+				slog.Warn("rate limiter: redis unreachable, allowing request", "error", err)
+				return next(c)
 			}
+			redisDown.Store(false)
 
 			if count == 1 {
 				rdb.Expire(ctx, key, time.Minute)

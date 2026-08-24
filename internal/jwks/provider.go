@@ -13,7 +13,7 @@ func NewProvider(ctx context.Context, jwksURL string) (keyfunc.Keyfunc, error) {
 		Ctx:               ctx,
 		RefreshInterval:   5 * time.Minute,
 		RefreshErrorHandler: func(_ context.Context, err error) {
-			// Log and continue using cached keys on refresh failure
+			// Continue using cached keys on refresh failure
 		},
 	})
 	if err != nil {

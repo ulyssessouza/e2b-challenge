@@ -33,7 +33,9 @@ func New(cfg *config.Config, sqlDB *sql.DB, rdb *redis.Client, kf keyfunc.Keyfun
 	authH := handler.NewAuthHandler(authSvc)
 	projectH := handler.NewProjectHandler(projectSvc)
 	sandboxH := handler.NewSandboxHandler(sandboxSvc)
+	healthH := handler.NewHealthCheck(sqlDB, rdb)
 
+	e.GET("/health", healthH.Check)
 	e.GET("/auth/login", authH.Login)
 	e.GET("/auth/callback", authH.Callback)
 

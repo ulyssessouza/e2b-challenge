@@ -27,6 +27,10 @@ func JWTAuth(kf keyfunc.Keyfunc) echo.MiddlewareFunc {
 				return echo.NewHTTPError(http.StatusUnauthorized, "invalid authorization header format")
 			}
 
+			if kf == nil {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "authentication service unavailable")
+			}
+
 			token, err := jwt.Parse(parts[1], kf.Keyfunc)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired token")
