@@ -18,6 +18,7 @@ import (
 
 func New(cfg *config.Config, sqlDB *sql.DB, rdb *redis.Client, kf keyfunc.Keyfunc) *echo.Echo {
 	e := echo.New()
+	e.HTTPErrorHandler = handler.HTTPErrorHandler
 
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestID())
