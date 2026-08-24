@@ -6,28 +6,26 @@ import (
 )
 
 type Config struct {
-	Port                   string
-	DatabaseURL            string
-	RedisAddr              string
-	HydraPublicURL         string
-	OAuthClientID          string
-	OAuthClientSecret      string
-	OAuthRedirectURI       string
-	RateLimitPerMin        int
-	RateLimitSandboxPerMin int
+	Port              string
+	DatabaseURL       string
+	RedisAddr         string
+	HydraPublicURL    string
+	OAuthClientID     string
+	OAuthClientSecret string
+	OAuthRedirectURI  string
+	RateLimitPerMin   int
 }
 
 func Load() *Config {
 	return &Config{
-		Port:                   getEnv("PORT", "8080"),
-		DatabaseURL:            getEnv("DATABASE_URL", "postgres://e2b:e2b@localhost:5432/e2b?sslmode=disable"),
-		RedisAddr:              getEnv("REDIS_ADDR", "localhost:6379"),
-		HydraPublicURL:         getEnv("HYDRA_PUBLIC_URL", "http://localhost:4444"),
-		OAuthClientID:          getEnv("OAUTH_CLIENT_ID", "e2b-assignment"),
-		OAuthClientSecret:      getEnv("OAUTH_CLIENT_SECRET", "e2b-assignment-secret"),
-		OAuthRedirectURI:       getEnv("OAUTH_REDIRECT_URI", "http://localhost:8080/auth/callback"),
-		RateLimitPerMin:        getIntEnv("RATE_LIMIT_PER_MIN", 1000),
-		RateLimitSandboxPerMin: getIntEnv("RATE_LIMIT_SANDBOX_PER_MIN", 100),
+		Port:              getEnv("PORT", "8080"),
+		DatabaseURL:       getEnv("DATABASE_URL", "postgres://e2b:e2b@localhost:5432/e2b?sslmode=disable"),
+		RedisAddr:         getEnv("REDIS_ADDR", "localhost:6379"),
+		HydraPublicURL:    getEnv("HYDRA_PUBLIC_URL", "http://localhost:4444"),
+		OAuthClientID:     getEnv("OAUTH_CLIENT_ID", "e2b-assignment"),
+		OAuthClientSecret: getEnv("OAUTH_CLIENT_SECRET", "e2b-assignment-secret"),
+		OAuthRedirectURI:  getEnv("OAUTH_REDIRECT_URI", "http://localhost:8080/auth/callback"),
+		RateLimitPerMin:   getIntEnv("RATE_LIMIT_PER_MIN", 1000),
 	}
 }
 

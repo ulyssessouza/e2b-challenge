@@ -1,8 +1,7 @@
 package observability
 
 import (
-	"context"
-	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -10,41 +9,44 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/trace"
 )
 
 var (
-	meter         = otel.Meter("e2b-sandbox-api")
-	requestCount  metric.Int64Counter
-	requestDur    metric.Int64Histogram
-	requestErrors metric.Int64Counter
+	instrumentsOnce sync.Once
+	requestCount    metric.Int64Counter
+	requestDur      metric.Int64Histogram
+	requestErrors   metric.Int64Counter
 )
 
-func init() {
-	var err error
-	requestCount, err = meter.Int64Counter("http.requests.total",
-		metric.WithDescription("Total number of HTTP requests"),
-		metric.WithUnit("{request}"),
-	)
-	if err != nil {
-		panic(err)
-	}
+func initInstruments() {
+	instrumentsOnce.Do(func() {
+		meter := otel.Meter("e2b-sandbox-api")
+		var err error
 
-	requestDur, err = meter.Int64Histogram("http.request.duration_ms",
-		metric.WithDescription("HTTP request duration in milliseconds"),
-		metric.WithUnit("ms"),
-	)
-	if err != nil {
-		panic(err)
-	}
+		requestCount, err = meter.Int64Counter("http.requests.total",
+			metric.WithDescription("Total number of HTTP requests"),
+			metric.WithUnit("{request}"),
+		)
+		if err != nil {
+			panic(err)
+		}
 
-	requestErrors, err = meter.Int64Counter("http.requests.errors",
-		metric.WithDescription("Number of failed HTTP requests"),
-		metric.WithUnit("{error}"),
-	)
-	if err != nil {
-		panic(err)
-	}
+		requestDur, err = meter.Int64Histogram("http.request.duration_ms",
+			metric.WithDescription("HTTP request duration in milliseconds"),
+			metric.WithUnit("ms"),
+		)
+		if err != nil {
+			panic(err)
+		}
+
+		requestErrors, err = meter.Int64Counter("http.requests.errors",
+			metric.WithDescription("Number of failed HTTP requests"),
+			metric.WithUnit("{error}"),
+		)
+		if err != nil {
+			panic(err)
+		}
+	})
 }
 
 func TracingMiddleware(serviceName string) echo.MiddlewareFunc {
@@ -54,6 +56,8 @@ func TracingMiddleware(serviceName string) echo.MiddlewareFunc {
 func MetricsMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			initInstruments()
+
 			start := time.Now()
 			err := next(c)
 			dur := time.Since(start)
@@ -75,19 +79,4 @@ func MetricsMiddleware() echo.MiddlewareFunc {
 			return err
 		}
 	}
-}
-
-func Logger() *slog.Logger {
-	return slog.Default()
-}
-
-func LoggerWithContext(ctx context.Context) *slog.Logger {
-	sc := trace.SpanContextFromContext(ctx)
-	if sc.HasTraceID() {
-		return slog.With(
-			slog.String("trace_id", sc.TraceID().String()),
-			slog.String("span_id", sc.SpanID().String()),
-		)
-	}
-	return slog.Default()
 }

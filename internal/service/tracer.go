@@ -1,5 +1,10 @@
 package service
 
-import "go.opentelemetry.io/otel"
+import (
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
+)
 
-var tracer = otel.Tracer("e2b-challenge")
+func Tracer() trace.Tracer {
+	return otel.Tracer("e2b-challenge")
+}

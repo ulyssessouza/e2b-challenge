@@ -1,20 +1,18 @@
 package config
 
 import (
-	"os"
 	"testing"
 )
 
 func TestLoad(t *testing.T) {
-	os.Setenv("PORT", "9090")
-	os.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
-	os.Setenv("REDIS_ADDR", "localhost:6380")
-	os.Setenv("HYDRA_PUBLIC_URL", "http://localhost:4444")
-	os.Setenv("OAUTH_CLIENT_ID", "test-client")
-	os.Setenv("OAUTH_CLIENT_SECRET", "test-secret")
-	os.Setenv("OAUTH_REDIRECT_URI", "http://localhost:9090/auth/callback")
-	os.Setenv("RATE_LIMIT_PER_MIN", "500")
-	os.Setenv("RATE_LIMIT_SANDBOX_PER_MIN", "50")
+	t.Setenv("PORT", "9090")
+	t.Setenv("DATABASE_URL", "postgres://localhost:5432/test")
+	t.Setenv("REDIS_ADDR", "localhost:6380")
+	t.Setenv("HYDRA_PUBLIC_URL", "http://localhost:4444")
+	t.Setenv("OAUTH_CLIENT_ID", "test-client")
+	t.Setenv("OAUTH_CLIENT_SECRET", "test-secret")
+	t.Setenv("OAUTH_REDIRECT_URI", "http://localhost:9090/auth/callback")
+	t.Setenv("RATE_LIMIT_PER_MIN", "500")
 
 	cfg := Load()
 
@@ -41,8 +39,5 @@ func TestLoad(t *testing.T) {
 	}
 	if cfg.RateLimitPerMin != 500 {
 		t.Errorf("expected RateLimitPerMin 500, got %d", cfg.RateLimitPerMin)
-	}
-	if cfg.RateLimitSandboxPerMin != 50 {
-		t.Errorf("expected RateLimitSandboxPerMin 50, got %d", cfg.RateLimitSandboxPerMin)
 	}
 }

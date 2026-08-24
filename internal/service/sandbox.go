@@ -20,7 +20,7 @@ func NewSandboxService(q *db.Queries) *SandboxService {
 }
 
 func (s *SandboxService) Create(ctx context.Context, projectID, userID string) (*db.Sandbox, error) {
-	ctx, span := tracer.Start(ctx, "sandbox.Create")
+	ctx, span := Tracer().Start(ctx, "sandbox.Create")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("sandbox.project_id", projectID),
@@ -39,7 +39,7 @@ func (s *SandboxService) Create(ctx context.Context, projectID, userID string) (
 }
 
 func (s *SandboxService) ListByProject(ctx context.Context, projectID string, p pagination.Params) ([]db.Sandbox, int64, error) {
-	ctx, span := tracer.Start(ctx, "sandbox.ListByProject")
+	ctx, span := Tracer().Start(ctx, "sandbox.ListByProject")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("sandbox.project_id", projectID),
@@ -66,7 +66,7 @@ func (s *SandboxService) ListByProject(ctx context.Context, projectID string, p 
 }
 
 func (s *SandboxService) Stop(ctx context.Context, sandboxID, userID string) error {
-	ctx, span := tracer.Start(ctx, "sandbox.Stop")
+	ctx, span := Tracer().Start(ctx, "sandbox.Stop")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("sandbox.id", sandboxID),

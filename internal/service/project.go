@@ -20,7 +20,7 @@ func NewProjectService(q *db.Queries) *ProjectService {
 }
 
 func (s *ProjectService) Create(ctx context.Context, name, ownerID string) (*db.Project, error) {
-	ctx, span := tracer.Start(ctx, "project.Create")
+	ctx, span := Tracer().Start(ctx, "project.Create")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("project.name", name),
@@ -45,7 +45,7 @@ func (s *ProjectService) Create(ctx context.Context, name, ownerID string) (*db.
 }
 
 func (s *ProjectService) ListByUser(ctx context.Context, userID string, p pagination.Params) ([]db.Project, int64, error) {
-	ctx, span := tracer.Start(ctx, "project.ListByUser")
+	ctx, span := Tracer().Start(ctx, "project.ListByUser")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("project.user_id", userID),
@@ -72,7 +72,7 @@ func (s *ProjectService) ListByUser(ctx context.Context, userID string, p pagina
 }
 
 func (s *ProjectService) GetByID(ctx context.Context, id string) (*db.Project, error) {
-	ctx, span := tracer.Start(ctx, "project.GetByID")
+	ctx, span := Tracer().Start(ctx, "project.GetByID")
 	defer span.End()
 	span.SetAttributes(attribute.String("project.id", id))
 
@@ -87,7 +87,7 @@ func (s *ProjectService) GetByID(ctx context.Context, id string) (*db.Project, e
 }
 
 func (s *ProjectService) AddMember(ctx context.Context, projectID, userEmail, role string) (*db.User, error) {
-	ctx, span := tracer.Start(ctx, "project.AddMember")
+	ctx, span := Tracer().Start(ctx, "project.AddMember")
 	defer span.End()
 	span.SetAttributes(
 		attribute.String("project.id", projectID),
