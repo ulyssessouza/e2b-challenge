@@ -12,6 +12,7 @@ import (
 	"e2b-challenge/internal/db"
 	"e2b-challenge/internal/handler"
 	mid "e2b-challenge/internal/middleware"
+	"e2b-challenge/internal/observability"
 	"e2b-challenge/internal/service"
 )
 
@@ -19,7 +20,9 @@ func New(cfg *config.Config, sqlDB *sql.DB, rdb *redis.Client, kf keyfunc.Keyfun
 	e := echo.New()
 
 	e.Use(middleware.Recover())
-	e.Use(middleware.Logger())
+	e.Use(middleware.RequestID())
+	e.Use(observability.TracingMiddleware("e2b-sandbox-api"))
+	e.Use(observability.MetricsMiddleware())
 
 	queries := db.New(sqlDB)
 

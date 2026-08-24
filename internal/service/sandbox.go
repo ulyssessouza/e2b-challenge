@@ -8,6 +8,7 @@ import (
 
 	"e2b-challenge/internal/db"
 	"e2b-challenge/internal/pagination"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type SandboxService struct {
@@ -19,6 +20,13 @@ func NewSandboxService(q *db.Queries) *SandboxService {
 }
 
 func (s *SandboxService) Create(ctx context.Context, projectID, userID string) (*db.Sandbox, error) {
+	ctx, span := tracer.Start(ctx, "sandbox.Create")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("sandbox.project_id", projectID),
+		attribute.String("sandbox.user_id", userID),
+	)
+
 	sandbox, err := s.q.CreateSandbox(ctx, db.CreateSandboxParams{
 		ProjectID: projectID,
 		UserID:    userID,
@@ -26,10 +34,19 @@ func (s *SandboxService) Create(ctx context.Context, projectID, userID string) (
 	if err != nil {
 		return nil, fmt.Errorf("creating sandbox: %w", err)
 	}
+	span.SetAttributes(attribute.String("sandbox.id", sandbox.ID))
 	return &sandbox, nil
 }
 
 func (s *SandboxService) ListByProject(ctx context.Context, projectID string, p pagination.Params) ([]db.Sandbox, int64, error) {
+	ctx, span := tracer.Start(ctx, "sandbox.ListByProject")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("sandbox.project_id", projectID),
+		attribute.Int("pagination.limit", int(p.Limit)),
+		attribute.Int("pagination.offset", int(p.Offset)),
+	)
+
 	sandboxes, err := s.q.ListSandboxesByProject(ctx, db.ListSandboxesByProjectParams{
 		ProjectID: projectID,
 		Limit:     p.Limit,
@@ -44,10 +61,18 @@ func (s *SandboxService) ListByProject(ctx context.Context, projectID string, p 
 		return nil, 0, fmt.Errorf("counting sandboxes: %w", err)
 	}
 
+	span.SetAttributes(attribute.Int64("sandbox.total", total))
 	return sandboxes, total, nil
 }
 
 func (s *SandboxService) Stop(ctx context.Context, sandboxID, userID string) error {
+	ctx, span := tracer.Start(ctx, "sandbox.Stop")
+	defer span.End()
+	span.SetAttributes(
+		attribute.String("sandbox.id", sandboxID),
+		attribute.String("sandbox.user_id", userID),
+	)
+
 	sandbox, err := s.q.GetSandboxByID(ctx, sandboxID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -68,9 +93,11 @@ func (s *SandboxService) Stop(ctx context.Context, sandboxID, userID string) err
 	}
 
 	if sandbox.Status == "stopped" {
+		span.SetAttributes(attribute.Bool("sandbox.already_stopped", true))
 		return fmt.Errorf("sandbox already stopped")
 	}
 
+	span.SetAttributes(attribute.Int("sandbox.version", int(sandbox.Version)))
 	rows, err := s.q.UpdateSandboxStatus(ctx, db.UpdateSandboxStatusParams{
 		ID:      sandboxID,
 		Status:  "stopped",
@@ -81,15 +108,15 @@ func (s *SandboxService) Stop(ctx context.Context, sandboxID, userID string) err
 	}
 
 	if rows == 0 {
-		// Version mismatch — concurrent modification
-		// Re-read to give the client useful feedback
 		updated, err := s.q.GetSandboxByID(ctx, sandboxID)
 		if err != nil {
 			return fmt.Errorf("conflict stopping sandbox: %w", err)
 		}
 		if updated.Status == "stopped" {
+			span.SetAttributes(attribute.Bool("sandbox.already_stopped", true))
 			return fmt.Errorf("sandbox already stopped")
 		}
+		span.SetAttributes(attribute.Bool("sandbox.conflict", true))
 		return fmt.Errorf("sandbox was modified concurrently, try again")
 	}
 
