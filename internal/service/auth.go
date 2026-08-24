@@ -33,6 +33,10 @@ type tokenResponse struct {
     IDToken     string `json:"id_token"`
 }
 
+func (s *AuthService) HydraPublicURL() string  { return s.cfg.HydraPublicURL }
+func (s *AuthService) OAuthClientID() string     { return s.cfg.OAuthClientID }
+func (s *AuthService) OAuthRedirectURI() string  { return s.cfg.OAuthRedirectURI }
+
 func (s *AuthService) ExchangeCode(ctx context.Context, code string) (string, error) {
     data := url.Values{
         "grant_type":   {"authorization_code"},

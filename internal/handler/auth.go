@@ -21,9 +21,9 @@ func NewAuthHandler(svc *service.AuthService) *AuthHandler {
 func (h *AuthHandler) Login(c echo.Context) error {
     authURL := fmt.Sprintf(
         "%s/oauth2/auth?client_id=%s&response_type=code&scope=openid&redirect_uri=%s",
-        "http://localhost:4444",
-        "e2b-assignment",
-        "http://localhost:8080/auth/callback",
+        h.svc.HydraPublicURL(),
+        h.svc.OAuthClientID(),
+        h.svc.OAuthRedirectURI(),
     )
     return c.Redirect(http.StatusFound, authURL)
 }
