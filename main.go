@@ -16,7 +16,6 @@ import (
 
 	"e2b-challenge/internal/config"
 	"e2b-challenge/internal/jwks"
-	"e2b-challenge/internal/observability"
 	"e2b-challenge/internal/server"
 )
 
@@ -25,12 +24,6 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	cleanup, err := observability.Setup(ctx, "e2b-sandbox-api")
-	if err != nil {
-		slog.Error("failed to setup observability", "error", err)
-		os.Exit(1)
-	}
 
 	sqlDB, err := sql.Open("postgres", cfg.DatabaseURL)
 	if err != nil {
@@ -65,7 +58,6 @@ func main() {
 	go func() {
 		<-quit
 		slog.Info("shutting down...")
-		cleanup(ctx)
 		sqlDB.Close()
 		rdb.Close()
 	}()

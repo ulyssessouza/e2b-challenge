@@ -1,8 +1,10 @@
 -- name: CreateSandbox :one
-INSERT INTO sandboxes (project_id, user_id) VALUES ($1, $2) RETURNING *;
+INSERT INTO sandboxes (project_id, user_id, name) VALUES ($1, $2, $3) RETURNING *;
 
--- name: GetSandboxByID :one
-SELECT * FROM sandboxes WHERE id = $1 LIMIT 1;
+-- name: GetSandboxByIDAndUser :one
+SELECT s.* FROM sandboxes s
+JOIN project_users pu ON pu.project_id = s.project_id
+WHERE s.id = $1 AND pu.user_id = $2;
 
 -- name: ListSandboxesByProject :many
 SELECT * FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC
@@ -11,5 +13,11 @@ LIMIT $2 OFFSET $3;
 -- name: CountSandboxesByProject :one
 SELECT COUNT(*) FROM sandboxes WHERE project_id = $1;
 
--- name: UpdateSandboxStatus :execrows
-UPDATE sandboxes SET status = $2, stopped_at = now(), version = version + 1 WHERE id = $1 AND version = $3;
+-- name: StopSandbox :execrows
+UPDATE sandboxes s SET stopped_at = now(), version = version + 1
+FROM project_users pu
+WHERE s.id = $1 AND pu.project_id = s.project_id AND pu.user_id = $2
+  AND s.stopped_at IS NULL;
+
+-- name: RestartSandbox :execrows
+UPDATE sandboxes SET stopped_at = NULL, version = version + 1 WHERE id = $1 AND version = $2;

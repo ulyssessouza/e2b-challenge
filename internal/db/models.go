@@ -25,10 +25,10 @@ type Sandbox struct {
 	ID        string
 	ProjectID string
 	UserID    string
-	Status    string
 	CreatedAt time.Time
 	StoppedAt sql.NullTime
 	Version   int32
+	Name      string
 }
 
 type User struct {

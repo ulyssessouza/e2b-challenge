@@ -21,50 +21,58 @@ func (q *Queries) CountSandboxesByProject(ctx context.Context, projectID string)
 }
 
 const createSandbox = `-- name: CreateSandbox :one
-INSERT INTO sandboxes (project_id, user_id) VALUES ($1, $2) RETURNING id, project_id, user_id, status, created_at, stopped_at, version
+INSERT INTO sandboxes (project_id, user_id, name) VALUES ($1, $2, $3) RETURNING id, project_id, user_id, created_at, stopped_at, version, name
 `
 
 type CreateSandboxParams struct {
 	ProjectID string
 	UserID    string
+	Name      string
 }
 
 func (q *Queries) CreateSandbox(ctx context.Context, arg CreateSandboxParams) (Sandbox, error) {
-	row := q.db.QueryRowContext(ctx, createSandbox, arg.ProjectID, arg.UserID)
+	row := q.db.QueryRowContext(ctx, createSandbox, arg.ProjectID, arg.UserID, arg.Name)
 	var i Sandbox
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,
 		&i.UserID,
-		&i.Status,
 		&i.CreatedAt,
 		&i.StoppedAt,
 		&i.Version,
+		&i.Name,
 	)
 	return i, err
 }
 
-const getSandboxByID = `-- name: GetSandboxByID :one
-SELECT id, project_id, user_id, status, created_at, stopped_at, version FROM sandboxes WHERE id = $1 LIMIT 1
+const getSandboxByIDAndUser = `-- name: GetSandboxByIDAndUser :one
+SELECT s.id, s.project_id, s.user_id, s.created_at, s.stopped_at, s.version, s.name FROM sandboxes s
+JOIN project_users pu ON pu.project_id = s.project_id
+WHERE s.id = $1 AND pu.user_id = $2
 `
 
-func (q *Queries) GetSandboxByID(ctx context.Context, id string) (Sandbox, error) {
-	row := q.db.QueryRowContext(ctx, getSandboxByID, id)
+type GetSandboxByIDAndUserParams struct {
+	ID     string
+	UserID string
+}
+
+func (q *Queries) GetSandboxByIDAndUser(ctx context.Context, arg GetSandboxByIDAndUserParams) (Sandbox, error) {
+	row := q.db.QueryRowContext(ctx, getSandboxByIDAndUser, arg.ID, arg.UserID)
 	var i Sandbox
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,
 		&i.UserID,
-		&i.Status,
 		&i.CreatedAt,
 		&i.StoppedAt,
 		&i.Version,
+		&i.Name,
 	)
 	return i, err
 }
 
 const listSandboxesByProject = `-- name: ListSandboxesByProject :many
-SELECT id, project_id, user_id, status, created_at, stopped_at, version FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC
+SELECT id, project_id, user_id, created_at, stopped_at, version, name FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
 `
 
@@ -87,10 +95,10 @@ func (q *Queries) ListSandboxesByProject(ctx context.Context, arg ListSandboxesB
 			&i.ID,
 			&i.ProjectID,
 			&i.UserID,
-			&i.Status,
 			&i.CreatedAt,
 			&i.StoppedAt,
 			&i.Version,
+			&i.Name,
 		); err != nil {
 			return nil, err
 		}
@@ -105,18 +113,37 @@ func (q *Queries) ListSandboxesByProject(ctx context.Context, arg ListSandboxesB
 	return items, nil
 }
 
-const updateSandboxStatus = `-- name: UpdateSandboxStatus :execrows
-UPDATE sandboxes SET status = $2, stopped_at = now(), version = version + 1 WHERE id = $1 AND version = $3
+const restartSandbox = `-- name: RestartSandbox :execrows
+UPDATE sandboxes SET stopped_at = NULL, version = version + 1 WHERE id = $1 AND version = $2
 `
 
-type UpdateSandboxStatusParams struct {
+type RestartSandboxParams struct {
 	ID      string
-	Status  string
 	Version int32
 }
 
-func (q *Queries) UpdateSandboxStatus(ctx context.Context, arg UpdateSandboxStatusParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, updateSandboxStatus, arg.ID, arg.Status, arg.Version)
+func (q *Queries) RestartSandbox(ctx context.Context, arg RestartSandboxParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, restartSandbox, arg.ID, arg.Version)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const stopSandbox = `-- name: StopSandbox :execrows
+UPDATE sandboxes s SET stopped_at = now(), version = version + 1
+FROM project_users pu
+WHERE s.id = $1 AND pu.project_id = s.project_id AND pu.user_id = $2
+  AND s.stopped_at IS NULL
+`
+
+type StopSandboxParams struct {
+	ID     string
+	UserID string
+}
+
+func (q *Queries) StopSandbox(ctx context.Context, arg StopSandboxParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, stopSandbox, arg.ID, arg.UserID)
 	if err != nil {
 		return 0, err
 	}

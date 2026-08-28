@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -26,7 +27,7 @@ func HTTPErrorHandler(err error, c echo.Context) {
 	code := http.StatusInternalServerError
 	msg := "internal error"
 
-	if he, ok := err.(*echo.HTTPError); ok {
+	if he, ok := errors.AsType[*echo.HTTPError](err); ok {
 		code = he.Code
 		if he.Message != nil {
 			msg = he.Message.(string)

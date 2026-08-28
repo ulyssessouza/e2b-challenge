@@ -31,12 +31,25 @@ func (h *SandboxHandler) List(c echo.Context) error {
 	return c.JSON(http.StatusOK, pagination.NewResponse(sandboxes, p, total))
 }
 
+type createSandboxRequest struct {
+	Name      string `json:"name"`
+	SandboxID string `json:"sandbox_id"`
+}
+
 func (h *SandboxHandler) Create(c echo.Context) error {
 	projectID := c.Param("id")
 	userID := c.Get(middleware.ContextUserID).(string)
 
-	sandbox, err := h.svc.Create(c.Request().Context(), projectID, userID)
+	var req createSandboxRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	sandbox, err := h.svc.Create(c.Request().Context(), projectID, userID, req.Name, req.SandboxID)
 	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -51,9 +64,6 @@ func (h *SandboxHandler) Stop(c echo.Context) error {
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
-		}
-		if strings.Contains(err.Error(), "not a member") {
-			return echo.NewHTTPError(http.StatusForbidden, err.Error())
 		}
 		if strings.Contains(err.Error(), "already stopped") {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())

@@ -1,7 +1,7 @@
 CREATE TABLE users (
     id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     email      TEXT NOT NULL UNIQUE,
-    name       TEXT NOT NULL DEFAULT '',
+    name       TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

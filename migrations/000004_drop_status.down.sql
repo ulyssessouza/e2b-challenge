@@ -1,0 +1,1 @@
+ALTER TABLE sandboxes ADD COLUMN status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'stopped'));
