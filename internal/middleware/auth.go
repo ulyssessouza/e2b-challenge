@@ -1,12 +1,17 @@
 package middleware
 
 import (
+	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/MicahParks/keyfunc/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
-	"github.com/MicahParks/keyfunc/v3"
+
+	"e2b-challenge/internal/db"
 )
 
 const (
@@ -14,7 +19,11 @@ const (
 	ContextUserEmail = "user_email"
 )
 
-func JWTAuth(kf keyfunc.Keyfunc) echo.MiddlewareFunc {
+type UserResolver interface {
+	GetUserByEmail(ctx context.Context, email string) (db.User, error)
+}
+
+func JWTAuth(kf keyfunc.Keyfunc, users UserResolver) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			authHeader := c.Request().Header.Get("Authorization")
@@ -46,10 +55,16 @@ func JWTAuth(kf keyfunc.Keyfunc) echo.MiddlewareFunc {
 				return echo.NewHTTPError(http.StatusUnauthorized, "token missing subject")
 			}
 
-			c.Set(ContextUserID, sub)
-			if email, ok := claims["email"].(string); ok {
-				c.Set(ContextUserEmail, email)
+			user, err := users.GetUserByEmail(c.Request().Context(), sub)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return echo.NewHTTPError(http.StatusUnauthorized, "user not found")
+				}
+				return echo.NewHTTPError(http.StatusInternalServerError, "database error")
 			}
+
+			c.Set(ContextUserID, user.ID)
+			c.Set(ContextUserEmail, user.Email)
 
 			return next(c)
 		}

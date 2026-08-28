@@ -41,7 +41,7 @@ func New(cfg *config.Config, sqlDB *sql.DB, rdb *redis.Client, kf keyfunc.Keyfun
 	e.GET("/auth/callback", authH.Callback)
 
 	r := e.Group("")
-	r.Use(mid.JWTAuth(kf))
+	r.Use(mid.JWTAuth(kf, queries))
 	r.Use(mid.RateLimiter(rdb, cfg.RateLimitPerMin))
 
 	r.GET("/v1/projects", projectH.List)
