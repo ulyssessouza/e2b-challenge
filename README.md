@@ -53,3 +53,10 @@ architecture should.
 If you have ideas for improvements that you didn't have time to implement, feel
 free to describe them in a short Markdown document outlining your proposed
 solution.
+
+## Design documentation
+
+- [`docs/DESIGN.md`](docs/DESIGN.md) — what was implemented, every decision and
+  the tradeoffs against the alternatives considered
+- [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md) — deliberately unimplemented
+  ideas and how they would be built
