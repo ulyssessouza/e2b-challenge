@@ -60,13 +60,20 @@ func (s *ProjectService) Create(ctx context.Context, name, ownerID string) (*db.
 
 // planUsage returns the owner's plan and how many projects they currently
 // own. Enforcement is intentionally check-then-create: concurrent creates
-// may overshoot by a few, bounded by request rate.
+// may overshoot by a few, bounded by request rate. For unlimited plans the
+// count is skipped entirely.
 func (s *ProjectService) planUsage(ctx context.Context, ownerID string) (db.Plan, int64, error) {
 	plan, err := s.q.GetUserPlan(ctx, ownerID)
 	if err != nil {
 		return db.Plan{}, 0, fmt.Errorf("getting plan: %w", err)
 	}
-	owned, err := s.q.CountProjectsOwnedByUser(ctx, ownerID)
+	if plan.MaxProjects <= 0 {
+		return plan, 0, nil // unlimited
+	}
+	owned, err := s.q.CountProjectsOwnedByUser(ctx, db.CountProjectsOwnedByUserParams{
+		UserID: ownerID,
+		Limit:  plan.MaxProjects,
+	})
 	if err != nil {
 		return db.Plan{}, 0, fmt.Errorf("counting owned projects: %w", err)
 	}

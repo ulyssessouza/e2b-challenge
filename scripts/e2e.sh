@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# End-to-end test for the sandbox API. Requires: compose stack up, server on :8080.
+# End-to-end test for the sandbox API (35 checks).
+# Requires: fresh database (docker compose down -v && docker compose up -d --wait,
+# then start the server) and the server on :8080. Not idempotent — run once.
 # Emulates the browser OAuth flow using Hydra's admin API for login/consent accept.
 set -u
+curl -fs http://localhost:8080/health >/dev/null || { echo "server not healthy on :8080"; exit 1; }
 BASE=http://localhost:8080
 HYDRA=http://localhost:4444
 ADMIN=http://localhost:4445
@@ -130,4 +133,4 @@ r=$(curl -s -o /dev/null -w '%{http_code}' -H "$AH" "$BASE/v1/projects/$P1_ID/sa
 check "bad pagination params -> 200 defaults" 200 "$r"
 echo "----------------------------------------"
 echo "PHASE-1 FAILURES: $FAILURES"
-exit 0
+exit "$FAILURES"

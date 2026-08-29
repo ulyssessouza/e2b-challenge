@@ -10,11 +10,21 @@ import (
 )
 
 const countRunningSandboxesByUser = `-- name: CountRunningSandboxesByUser :one
-SELECT COUNT(*) FROM sandboxes WHERE user_id = $1 AND stopped_at IS NULL
+SELECT COUNT(*) FROM (
+    SELECT 1 FROM sandboxes
+    WHERE user_id = $1 AND stopped_at IS NULL
+    LIMIT $2
+) running
 `
 
-func (q *Queries) CountRunningSandboxesByUser(ctx context.Context, userID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countRunningSandboxesByUser, userID)
+type CountRunningSandboxesByUserParams struct {
+	UserID string
+	Limit  int32
+}
+
+// The LIMIT caps the scan at the plan cap (see CountProjectsOwnedByUser).
+func (q *Queries) CountRunningSandboxesByUser(ctx context.Context, arg CountRunningSandboxesByUserParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRunningSandboxesByUser, arg.UserID, arg.Limit)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -81,7 +91,7 @@ func (q *Queries) GetSandboxByIDAndUser(ctx context.Context, arg GetSandboxByIDA
 }
 
 const listSandboxesByProject = `-- name: ListSandboxesByProject :many
-SELECT id, project_id, user_id, created_at, stopped_at, name FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC
+SELECT id, project_id, user_id, created_at, stopped_at, name FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3
 `
 

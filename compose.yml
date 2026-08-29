@@ -24,7 +24,7 @@
 # Hydra is a fixture, not part of the exercise — you only implement the client
 # side of the authorization-code flow and the token validation in your service. If your service doesn't
 # listen on `:8080` or you want a different callback path, edit the
-# `redirect_uris` in the `hydra-bootstrap` job in `docker-compose.yml` and run
+# `redirect_uris` in the `hydra-bootstrap` job in `compose.yml` and run
 # `docker compose up hydra-bootstrap` again.
 #
 # Hydra stores its state in memory: the client is re-created automatically on

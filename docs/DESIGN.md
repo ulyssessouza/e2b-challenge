@@ -61,8 +61,10 @@ strong opinion either way; the cost of the framework is low either way.
 
 ## 3. Data model
 
-Schema (migrations 000001–000007): `users`, `projects`, `project_users`,
-`sandboxes`. All access through sqlc.
+Schema (migrations 000001–000007): `users`, `plans`, `projects`,
+`project_users`, `sandboxes` (indexes: `idx_project_users_user_id`,
+`idx_sandboxes_project_created_at`, `idx_sandboxes_user_id`,
+`idx_sandboxes_user_running`). All access through sqlc.
 
 ### 3.1 sqlc over ORMs / raw SQL
 
@@ -312,8 +314,10 @@ soft (check-then-create): concurrent creates can overshoot the cap by a few,
 bounded by the rate limit, and the overshoot persists while those sandboxes
 run — strict enforcement (per-user advisory lock or Redis counters) is the
 documented upgrade path. When a member restarts a sandbox someone else
-created, the check applies to the actor's plan while the running count is
-attributed to the creator.
+created, the check targets the CREATOR's plan — the creator's count grows,
+so checking the actor's instead would let members trade their own unused
+headroom to push a capped creator past their limit. The bounded count
+queries (`LIMIT <plan cap>`) keep the check O(cap), not O(user history).
 
 | Alternative | Why rejected / deferred |
 |---|---|
@@ -339,6 +343,14 @@ attributed to the creator.
 | POST | `/v1/projects/:id/members` | JWT + **owner** | Add member by email |
 | GET/POST | `/v1/projects/:id/sandboxes` | JWT + member + rate limit | List / create (or restart when `sandbox_id` present) |
 | DELETE | `/v1/sandboxes/:id` | JWT (SQL-enforced membership) | Stop a sandbox |
+
+**Routing fallback behavior (deliberate):** authentication middleware wraps
+the router's fallback handlers, so unauthenticated callers get 401 for
+unknown routes and wrong methods (no route enumeration without a token);
+authenticated callers get 404 rather than RFC-405 for unsupported methods —
+Echo stamps the group middleware onto fallbacks, and emitting 405 would
+require moving auth out of the group, which would trade away that
+enumeration protection for cosmetic HTTP semantics.
 
 `POST /sandboxes` doubling as restart via optional `sandbox_id` mirrors E2B's
 real-world "create if absent, restart if present" ergonomics; `created`
@@ -457,7 +469,7 @@ here.
 - **End-to-end**: the full browser flow (emulated over HTTP with Hydra's
   admin accept endpoints) plus the complete authz/lifecycle/limits matrix,
   exercised against the live stack via the shipped scripts
-  (`scripts/e2e.sh` — 35 checks; `scripts/quota_e2e.sh` — 16 plan-limit
+  (`scripts/e2e.sh` — 34 checks; `scripts/quota_e2e.sh` — 16 plan-limit
   checks, run after it on a fresh database). This is what caught the two
   bugs static review missed (empty-`Addr` random port binding; `aud`
   validation incompatible with Hydra's empty-audience tokens) and the

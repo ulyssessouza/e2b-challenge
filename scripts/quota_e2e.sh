@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Plans-quota E2E: run after e2e.sh on a fresh DB (user A owns 2 projects, 0 running sandboxes).
+# Not idempotent — a second run re-hits the caps from the first run.
 set -u
+curl -fs http://localhost:8080/health >/dev/null || { echo "server not healthy on :8080"; exit 1; }
 B=http://localhost:8080
 ADMIN=http://localhost:4445
 FAILURES=0
@@ -38,8 +40,9 @@ for i in 1 2 3; do
   r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$H" -H 'Content-Type: application/json' -d "{\"name\":\"q-sbx-$i\"}" "$B/v1/projects/$PID/sandboxes")
   check "create running sandbox #$i -> 201" 201 "$r"
 done
-body=$(curl -s -X POST -H "$H" -H 'Content-Type: application/json' -d '{"name":"q-sbx-4"}' "$B/v1/projects/$PID/sandboxes")
-check "4th running sandbox -> 403" 403 "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$H" -H 'Content-Type: application/json' -d '{"name":"q-sbx-4"}' "$B/v1/projects/$PID/sandboxes")"
+body=$(curl -s -w '\n%{http_code}' -X POST -H "$H" -H 'Content-Type: application/json' -d '{"name":"q-sbx-4"}' "$B/v1/projects/$PID/sandboxes")
+code=$(echo "$body" | tail -1); body=$(echo "$body" | head -n -1)
+check "4th running sandbox -> 403" 403 "$code"
 msg=$(echo "$body" | jq -r .message); check "403 names the plan and limit" 'quota exceeded: plan "hobby" allows 3 running sandboxes' "$msg"
 
 SID=$(curl -s -H "$H" "$B/v1/projects/$PID/sandboxes?limit=1" | jq -r '[.data[] | select(.stopped_at==null)][0].id')
@@ -65,4 +68,4 @@ check "B (member) create sandbox in A's project -> 201 (B's own quota)" 201 "$(c
 
 echo "----------------------------------------"
 echo "QUOTA FAILURES: $FAILURES"
-exit 0
+exit "$FAILURES"

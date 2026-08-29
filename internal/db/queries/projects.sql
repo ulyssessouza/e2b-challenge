@@ -8,7 +8,7 @@ SELECT * FROM projects WHERE id = $1 LIMIT 1;
 SELECT p.* FROM projects p
 JOIN project_users pu ON pu.project_id = p.id
 WHERE pu.user_id = $1
-ORDER BY p.created_at DESC
+ORDER BY p.created_at DESC, p.id DESC
 LIMIT $2 OFFSET $3;
 
 -- name: CountProjectsByUser :one

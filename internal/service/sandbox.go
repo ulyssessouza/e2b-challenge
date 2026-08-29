@@ -54,11 +54,17 @@ func (s *SandboxService) checkRunningQuota(ctx context.Context, userID string) e
 	if err != nil {
 		return fmt.Errorf("getting plan: %w", err)
 	}
-	running, err := s.q.CountRunningSandboxesByUser(ctx, userID)
+	if plan.MaxRunningSandboxes <= 0 {
+		return nil // unlimited
+	}
+	running, err := s.q.CountRunningSandboxesByUser(ctx, db.CountRunningSandboxesByUserParams{
+		UserID: userID,
+		Limit:  plan.MaxRunningSandboxes,
+	})
 	if err != nil {
 		return fmt.Errorf("counting running sandboxes: %w", err)
 	}
-	if plan.MaxRunningSandboxes > 0 && running >= int64(plan.MaxRunningSandboxes) {
+	if running >= int64(plan.MaxRunningSandboxes) {
 		return fmt.Errorf("%w: plan %q allows %d running sandboxes", ErrQuotaExceeded, plan.Name, plan.MaxRunningSandboxes)
 	}
 	return nil
@@ -84,7 +90,11 @@ func (s *SandboxService) Restart(ctx context.Context, projectID, userID, sandbox
 		return &sandbox, nil
 	}
 
-	if err := s.checkRunningQuota(ctx, userID); err != nil {
+	// The quota is charged to the sandbox CREATOR (running sandboxes are
+	// counted by creator), so a member restarting someone else's sandbox
+	// must not spend their own quota headroom to grow the creator's count
+	// past the creator's cap.
+	if err := s.checkRunningQuota(ctx, sandbox.UserID); err != nil {
 		return nil, err
 	}
 	// The guarded UPDATE re-checks membership and the stopped state at write

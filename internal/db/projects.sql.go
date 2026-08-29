@@ -82,7 +82,7 @@ const listProjectsByUser = `-- name: ListProjectsByUser :many
 SELECT p.id, p.name, p.created_at FROM projects p
 JOIN project_users pu ON pu.project_id = p.id
 WHERE pu.user_id = $1
-ORDER BY p.created_at DESC
+ORDER BY p.created_at DESC, p.id DESC
 LIMIT $2 OFFSET $3
 `
 

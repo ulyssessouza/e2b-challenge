@@ -7,14 +7,19 @@ JOIN project_users pu ON pu.project_id = s.project_id
 WHERE s.id = $1 AND pu.user_id = $2;
 
 -- name: ListSandboxesByProject :many
-SELECT * FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC
+SELECT * FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3;
 
 -- name: CountSandboxesByProject :one
 SELECT COUNT(*) FROM sandboxes WHERE project_id = $1;
 
 -- name: CountRunningSandboxesByUser :one
-SELECT COUNT(*) FROM sandboxes WHERE user_id = $1 AND stopped_at IS NULL;
+-- The LIMIT caps the scan at the plan cap (see CountProjectsOwnedByUser).
+SELECT COUNT(*) FROM (
+    SELECT 1 FROM sandboxes
+    WHERE user_id = $1 AND stopped_at IS NULL
+    LIMIT $2
+) running;
 
 -- name: StopSandbox :execrows
 UPDATE sandboxes s SET stopped_at = now()

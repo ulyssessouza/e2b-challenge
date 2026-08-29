@@ -28,6 +28,28 @@ page and a test user, so you don't need any external accounts
   - Find the pre-configured OAuth client credentials and redirect URI in the
     compose file
 
+## Running & verifying
+
+```sh
+docker compose up -d --wait   # Postgres, Redis, Hydra (fixture)
+go run .                      # starts on :8080, runs migrations, logs in via demo page
+```
+
+Log in at `http://localhost:8080/auth/login` (demo user `foo@bar.com` /
+`foobar`), then call the API with the returned access token.
+
+End-to-end suites (require a **fresh** database and a running server):
+
+```sh
+mise run reset            # or: docker compose down -v && docker compose up -d --wait
+go run . &                # or: mise run dev
+scripts/e2e.sh            # 35 checks: OAuth flow, authz matrix, sandbox lifecycle
+scripts/quota_e2e.sh      # 16 checks: plan limits, slot freeing, restart-at-cap
+```
+
+Both scripts exit non-zero on failure. Design decisions and tradeoffs:
+[`docs/DESIGN.md`](docs/DESIGN.md).
+
 ## What to Build
 
 Build a Go service that exposes:

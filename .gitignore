@@ -1,0 +1,9 @@
+# IDE
+.idea/
+
+# Build artifacts
+/e2b-challenge
+/e2b-server
+
+# Local env
+.env

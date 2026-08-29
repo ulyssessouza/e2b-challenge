@@ -68,6 +68,8 @@ mise run test
 │   ├── server/          # Echo server setup
 │   ├── jwks/            # JWKS key provider
 │   └── pagination/      # offset pagination envelope
+├── scripts/             # e2e.sh, quota_e2e.sh (live end-to-end suites)
+└── docs/                # DESIGN.md, IMPROVEMENTS.md, specs
 ```
 
 ## OAuth test credentials

@@ -103,6 +103,9 @@ func (h *AuthHandler) Callback(c echo.Context) error {
 	if iss, _ := claims["iss"].(string); iss != h.svc.HydraPublicURL() {
 		return echo.NewHTTPError(http.StatusInternalServerError, "unexpected token issuer")
 	}
+	if cid, _ := claims["client_id"].(string); cid != h.svc.OAuthClientID() {
+		return echo.NewHTTPError(http.StatusInternalServerError, "token issued for a different client")
+	}
 	if exp, ok := claims["exp"].(float64); !ok || time.Now().Unix() >= int64(exp) {
 		return echo.NewHTTPError(http.StatusInternalServerError, "token expired or missing expiration")
 	}
