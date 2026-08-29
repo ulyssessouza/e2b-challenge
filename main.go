@@ -85,6 +85,7 @@ func main() {
 	// Timeouts protect the server from slow clients (slowloris-style
 	// connection exhaustion); echo.Start alone would use zero timeouts.
 	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,

@@ -26,7 +26,7 @@ type UserResolver interface {
 	GetUserByOAuthSub(ctx context.Context, sub string) (db.User, error)
 }
 
-func JWTAuth(kf keyfunc.Keyfunc, users UserResolver, issuer, audience string) echo.MiddlewareFunc {
+func JWTAuth(kf keyfunc.Keyfunc, users UserResolver, issuer, clientID string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			authHeader := c.Request().Header.Get("Authorization")
@@ -47,7 +47,6 @@ func JWTAuth(kf keyfunc.Keyfunc, users UserResolver, issuer, audience string) ec
 				jwt.WithValidMethods([]string{"RS256"}),
 				jwt.WithExpirationRequired(),
 				jwt.WithIssuer(issuer),
-				jwt.WithAudience(audience),
 			)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired token")
@@ -56,6 +55,16 @@ func JWTAuth(kf keyfunc.Keyfunc, users UserResolver, issuer, audience string) ec
 			claims, ok := token.Claims.(jwt.MapClaims)
 			if !ok || !token.Valid {
 				return echo.NewHTTPError(http.StatusUnauthorized, "invalid token claims")
+			}
+
+			// Hydra does not populate aud unless audiences are explicitly
+			// requested; client_id is its reliable per-client identity claim.
+			// Rejecting foreign clients keeps tokens minted for other
+			// first-party apps from being replayed against this API.
+			if clientID != "" {
+				if cid, _ := claims["client_id"].(string); cid != clientID {
+					return echo.NewHTTPError(http.StatusUnauthorized, "token issued for a different client")
+				}
 			}
 
 			sub, _ := claims["sub"].(string)

@@ -62,11 +62,12 @@ func signToken(t *testing.T, priv *rsa.PrivateKey, sub string) string {
 func signTokenWithClaims(t *testing.T, priv *rsa.PrivateKey, mutate func(jwt.MapClaims)) string {
 	t.Helper()
 	claims := jwt.MapClaims{
-		"sub": "foo@bar.com",
-		"iss": "http://localhost:4444",
-		"aud": "e2b-assignment",
-		"iat": time.Now().Add(-time.Minute).Unix(),
-		"exp": time.Now().Add(time.Hour).Unix(),
+		"sub":       "foo@bar.com",
+		"iss":       "http://localhost:4444",
+		"aud":       []string{},
+		"client_id": "e2b-assignment",
+		"iat":       time.Now().Add(-time.Minute).Unix(),
+		"exp":       time.Now().Add(time.Hour).Unix(),
 	}
 	if mutate != nil {
 		mutate(claims)
@@ -185,17 +186,31 @@ func TestJWTAuthRejectsWrongIssuer(t *testing.T) {
 	}
 }
 
-func TestJWTAuthRejectsWrongAudience(t *testing.T) {
+func TestJWTAuthRejectsWrongClientID(t *testing.T) {
 	kf, priv := testKeyfunc(t)
 	stub := stubUserResolver{user: db.User{ID: "u1", Email: "foo@bar.com"}}
 
 	token := signTokenWithClaims(t, priv, func(claims jwt.MapClaims) {
-		claims["aud"] = "another-app"
+		claims["client_id"] = "another-app"
 	})
 
 	_, he := doJWTAuth(t, kf, stub, token)
 	if he == nil || he.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for foreign audience, got %+v", he)
+		t.Fatalf("expected 401 for foreign client_id, got %+v", he)
+	}
+}
+
+func TestJWTAuthRejectsMissingClientID(t *testing.T) {
+	kf, priv := testKeyfunc(t)
+	stub := stubUserResolver{user: db.User{ID: "u1", Email: "foo@bar.com"}}
+
+	token := signTokenWithClaims(t, priv, func(claims jwt.MapClaims) {
+		delete(claims, "client_id")
+	})
+
+	_, he := doJWTAuth(t, kf, stub, token)
+	if he == nil || he.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for token without client_id, got %+v", he)
 	}
 }
 
