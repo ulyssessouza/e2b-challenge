@@ -9,17 +9,6 @@ import (
 	"context"
 )
 
-const countRunningSandboxesByProject = `-- name: CountRunningSandboxesByProject :one
-SELECT COUNT(*) FROM sandboxes WHERE project_id = $1 AND stopped_at IS NULL
-`
-
-func (q *Queries) CountRunningSandboxesByProject(ctx context.Context, projectID string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countRunningSandboxesByProject, projectID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countRunningSandboxesByUser = `-- name: CountRunningSandboxesByUser :one
 SELECT COUNT(*) FROM sandboxes WHERE user_id = $1 AND stopped_at IS NULL
 `

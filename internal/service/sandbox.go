@@ -26,16 +26,8 @@ func (s *SandboxService) Create(ctx context.Context, projectID, userID, name, sa
 		return sandbox, false, err
 	}
 
-	plan, err := s.q.GetUserPlan(ctx, userID)
-	if err != nil {
-		return nil, false, fmt.Errorf("getting plan: %w", err)
-	}
-	running, err := s.q.CountRunningSandboxesByUser(ctx, userID)
-	if err != nil {
-		return nil, false, fmt.Errorf("counting running sandboxes: %w", err)
-	}
-	if plan.MaxRunningSandboxes > 0 && running >= int64(plan.MaxRunningSandboxes) {
-		return nil, false, fmt.Errorf("%w: plan %q allows %d running sandboxes", ErrQuotaExceeded, plan.Name, plan.MaxRunningSandboxes)
+	if err := s.checkRunningQuota(ctx, userID); err != nil {
+		return nil, false, err
 	}
 
 	sandbox, err := s.q.CreateSandbox(ctx, db.CreateSandboxParams{
@@ -51,6 +43,25 @@ func (s *SandboxService) Create(ctx context.Context, projectID, userID, name, sa
 		return nil, false, fmt.Errorf("creating sandbox: %w", err)
 	}
 	return &sandbox, true, nil
+}
+
+// checkRunningQuota rejects the action when the user's plan cap on running
+// sandboxes is exhausted. Applied to BOTH create and restart: while a sandbox
+// is stopped it does not count toward the quota, so restarting one is growth
+// whenever new sandboxes were created since the stop.
+func (s *SandboxService) checkRunningQuota(ctx context.Context, userID string) error {
+	plan, err := s.q.GetUserPlan(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("getting plan: %w", err)
+	}
+	running, err := s.q.CountRunningSandboxesByUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("counting running sandboxes: %w", err)
+	}
+	if plan.MaxRunningSandboxes > 0 && running >= int64(plan.MaxRunningSandboxes) {
+		return fmt.Errorf("%w: plan %q allows %d running sandboxes", ErrQuotaExceeded, plan.Name, plan.MaxRunningSandboxes)
+	}
+	return nil
 }
 
 func (s *SandboxService) Restart(ctx context.Context, projectID, userID, sandboxID string) (*db.Sandbox, error) {
@@ -73,6 +84,9 @@ func (s *SandboxService) Restart(ctx context.Context, projectID, userID, sandbox
 		return &sandbox, nil
 	}
 
+	if err := s.checkRunningQuota(ctx, userID); err != nil {
+		return nil, err
+	}
 	// The guarded UPDATE re-checks membership and the stopped state at write
 	// time, so a revocation between the read and the write cannot resurrect
 	// the sandbox for a former member, and a concurrent restart converges to

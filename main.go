@@ -77,7 +77,7 @@ func main() {
 		}
 	}
 	if kf == nil {
-		slog.Warn("hydra unavailable, authentication disabled", "error", err)
+		slog.Warn("hydra unavailable, protected routes will fail closed", "error", err)
 	}
 
 	e := server.New(cfg, sqlDB, rdb, kf)

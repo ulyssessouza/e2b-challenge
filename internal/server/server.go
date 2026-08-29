@@ -19,6 +19,10 @@ import (
 func New(cfg *config.Config, sqlDB *sql.DB, rdb *redis.Client, kf keyfunc.Keyfunc) *echo.Echo {
 	e := echo.New()
 	e.HTTPErrorHandler = handler.HTTPErrorHandler
+	// The service is exposed directly (no trusted proxy in front), so the
+	// client IP comes from the connection — honoring X-Forwarded-For would
+	// let callers spoof their IP and sidestep the per-IP auth throttling.
+	e.IPExtractor = echo.ExtractIPDirect()
 
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestID())

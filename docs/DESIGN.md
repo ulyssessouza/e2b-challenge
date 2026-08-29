@@ -72,7 +72,7 @@ Schema (migrations 000001–000007): `users`, `projects`, `project_users`,
 | GORM/ent | Runtime query building hides the SQL that runs; migrations drift from models; harder to reason about per-query cost at scale. |
 | Raw `database/sql` | No compile-time check of column/param ordering — a renamed column breaks at runtime, not at build. |
 
-### 3.2 Identity: `oauth_sub`, not email (migration 000006)
+### 3.2 Identity: `oauth_sub`, not email (migration 000005)
 
 **Decision:** users carry `oauth_sub TEXT UNIQUE NOT NULL` (the IdP subject);
 JWTs resolve users via `oauth_sub`; `email`/`name` are profile data.
@@ -94,7 +94,7 @@ kept existing rows valid.
 
 `(project_id, user_id)` PK enforces "one membership per pair" at the DB level;
 `role CHECK (role IN ('owner','member'))` keeps roles closed-set. The reverse
-index `idx_project_users_user_id (user_id, project_id)` (migration 000005)
+index `idx_project_users_user_id (user_id, project_id)` (migration 000004)
 serves user→projects queries; the PK serves project→member checks.
 
 **Decision: roles are data (`owner`, `member`) with owner-only member
@@ -302,9 +302,18 @@ hobby). Limits scope over what a user *has*:
 - **running sandboxes the user created** (`sandboxes.user_id`,
   `stopped_at IS NULL`), across all projects.
 
-`Create` in both services checks plan vs usage (check-then-create) and
-rejects with 403 naming the plan and the limit. **Restart is not
-quota-checked** — restoring a stopped sandbox is not growth. 0 = unlimited.
+`Create` and `Restart` in the sandbox service, and `Create` in the project
+service, check plan vs usage (check-then-create) and reject with 403 naming
+the plan and the limit. **Restart is quota-checked too**: while a sandbox is
+stopped it does not count toward the quota, so restarting is growth whenever
+new sandboxes were created since the stop — exempting restart would let
+running count exceed the cap without bound. 0 = unlimited. Enforcement is
+soft (check-then-create): concurrent creates can overshoot the cap by a few,
+bounded by the rate limit, and the overshoot persists while those sandboxes
+run — strict enforcement (per-user advisory lock or Redis counters) is the
+documented upgrade path. When a member restarts a sandbox someone else
+created, the check applies to the actor's plan while the running count is
+attributed to the creator.
 
 | Alternative | Why rejected / deferred |
 |---|---|
@@ -446,10 +455,13 @@ here.
   meant for the compose stack; live-service tests skip (not fail) when
   dependencies are absent so `go test ./...` works anywhere.
 - **End-to-end**: the full browser flow (emulated over HTTP with Hydra's
-  admin accept endpoints) plus the complete authz/lifecycle/limits matrix was
-  exercised against the live stack — this is what caught the two bugs static
-  review missed (empty-`Addr` random port binding; `aud` validation
-  incompatible with Hydra's empty-audience tokens).
+  admin accept endpoints) plus the complete authz/lifecycle/limits matrix,
+  exercised against the live stack via the shipped scripts
+  (`scripts/e2e.sh` — 35 checks; `scripts/quota_e2e.sh` — 16 plan-limit
+  checks, run after it on a fresh database). This is what caught the two
+  bugs static review missed (empty-`Addr` random port binding; `aud`
+  validation incompatible with Hydra's empty-audience tokens) and the
+  restart-quota bypass found in final review.
 
 | Alternative | Why rejected / deferred |
 |---|---|
@@ -469,6 +481,6 @@ here.
 | 60 s user-cache TTL | Huge DB-load cut | Revocation lag ≤ 60 s | Event-driven invalidation |
 | Fail-open rate limiter (default) | Availability | Unprotected during Redis incidents | `RATE_LIMIT_FAIL_OPEN=false` |
 | 404/403 distinction | Debuggability | Existence oracle for authed users | Uniform 404 |
-| Quota count-then-insert | Simple, no locks | Contention overshoot (bounded, self-healing) | Serializable tx / Redis counters |
+| Quota count-then-insert | Simple, no locks | Contention overshoot (bounded by rate limit; persists while the sandboxes run) | Per-user advisory lock / Redis counters |
 | No `Cookie` `__Host-` prefix / PKCE | Fixture compatibility | Marginal hardening left on table | IMPROVEMENTS.md |
 | Demo secrets in config defaults | Runnable out of the box | Not production secrets hygiene | Env injection / vault |

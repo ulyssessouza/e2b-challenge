@@ -1,8 +1,8 @@
 CREATE TABLE plans (
     id                    TEXT PRIMARY KEY,
     name                  TEXT NOT NULL UNIQUE,
-    max_projects          INTEGER NOT NULL,
-    max_running_sandboxes INTEGER NOT NULL,
+    max_projects          INTEGER NOT NULL CHECK (max_projects >= 0),
+    max_running_sandboxes INTEGER NOT NULL CHECK (max_running_sandboxes >= 0),
     created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

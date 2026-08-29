@@ -2,6 +2,7 @@ package jwks
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/MicahParks/jwkset"
@@ -13,7 +14,10 @@ func NewProvider(ctx context.Context, jwksURL string) (keyfunc.Keyfunc, error) {
 		Ctx:             ctx,
 		RefreshInterval: 5 * time.Minute,
 		RefreshErrorHandler: func(_ context.Context, err error) {
-			// Continue using cached keys on refresh failure
+			// Keep serving cached keys on refresh failure, but make the
+			// degradation visible — a silently stuck JWKS is otherwise
+			// indistinguishable from healthy.
+			slog.Error("jwks: refresh failed, serving cached keys", "error", err)
 		},
 	})
 	if err != nil {

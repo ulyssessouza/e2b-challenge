@@ -67,6 +67,11 @@ a sliding-window Lua script smooths this without extra round-trips.
   subject (Hydra's demo sets `sub` = email). In production, take `email` from
   the ID token / `/userinfo` and never guess it.
 - Add PKCE to the authorization-code flow (cheap, protects public clients).
+- The login upsert does a no-op `DO UPDATE` per returning login (to get the
+  row back from `RETURNING`); `DO NOTHING` + re-select avoids the dead-tuple
+  write. Also: with a real IdP where two subjects share an email, the
+  `users.email UNIQUE` constraint would 500 the second login — take email
+  from `/userinfo` and handle collisions when that path exists.
 - Refresh-token rotation with server-side storage for session revocation.
 
 ## Sandbox lifecycle as a system

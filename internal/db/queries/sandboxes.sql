@@ -13,9 +13,6 @@ LIMIT $2 OFFSET $3;
 -- name: CountSandboxesByProject :one
 SELECT COUNT(*) FROM sandboxes WHERE project_id = $1;
 
--- name: CountRunningSandboxesByProject :one
-SELECT COUNT(*) FROM sandboxes WHERE project_id = $1 AND stopped_at IS NULL;
-
 -- name: CountRunningSandboxesByUser :one
 SELECT COUNT(*) FROM sandboxes WHERE user_id = $1 AND stopped_at IS NULL;
 

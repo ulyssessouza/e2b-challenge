@@ -59,8 +59,11 @@ concurrency, re-evaluated per request):
   with `ErrQuotaExceeded` when `max_projects > 0 && owned >= max`.
 - `SandboxService.Create`: `GetUserPlan` + `CountRunningSandboxesByUser`;
   reject when `max_running_sandboxes > 0 && running >= max`.
-- **Restart is not quota-checked**: it returns the user's own stopped sandbox
-  to running — restoring, not growing.
+- **Restart is quota-checked**: while a sandbox is stopped it does not count
+  toward the quota, so restarting is growth whenever new sandboxes were
+  created since the stop (otherwise running count could exceed the cap
+  without bound). Restoring a sandbox the user just stopped still works —
+  the freed slot makes room again.
 - Rejections are 403 with the plan name and limit in the message ("plan
   'hobby' allows 3 running sandboxes") so developers can tell *why*.
 
@@ -83,5 +86,6 @@ constructor parameter are removed.
 - Unit: config test loses the env field (no service-level unit tests without
   a DB; see existing skipped integration stubs).
 - E2E (live stack): 4th running sandbox → 403 with plan message; 6th owned
-  project → 403; stop frees a slot (create succeeds again); restart at cap
-  still 200; all prior lifecycle checks stay green.
+  project → 403; stop frees a slot (create succeeds again); restart when at
+  cap → 403 (the slot must be freed first); all prior lifecycle checks stay
+  green.
