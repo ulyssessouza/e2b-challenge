@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -10,30 +11,36 @@ import (
 	"e2b-challenge/internal/db"
 )
 
-func ProjectMembership(q *db.Queries) echo.MiddlewareFunc {
+// MembershipChecker resolves whether a user is a member of a project. A nil
+// role (Valid == false) means the project exists but the user is not a member.
+type MembershipChecker interface {
+	GetProjectMembership(ctx context.Context, arg db.GetProjectMembershipParams) (sql.NullString, error)
+}
+
+func ProjectMembership(q MembershipChecker) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			projectID := c.Param("id")
-			userID := c.Get(ContextUserID).(string)
+			userID, ok := c.Get(ContextUserID).(string)
+			if !ok {
+				return echo.NewHTTPError(http.StatusUnauthorized, "user not authenticated")
+			}
 
-			_, err := q.GetProjectByID(c.Request().Context(), projectID)
+			role, err := q.GetProjectMembership(c.Request().Context(), db.GetProjectMembershipParams{
+				ID:     projectID,
+				UserID: userID,
+			})
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return echo.NewHTTPError(http.StatusNotFound, "project not found")
 				}
 				return echo.NewHTTPError(http.StatusInternalServerError, "database error")
 			}
-
-			_, err = q.GetProjectMember(c.Request().Context(), db.GetProjectMemberParams{
-				ProjectID: projectID,
-				UserID:    userID,
-			})
-			if err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					return echo.NewHTTPError(http.StatusForbidden, "not a member of this project")
-				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "database error")
+			if !role.Valid {
+				return echo.NewHTTPError(http.StatusForbidden, "not a member of this project")
 			}
+
+			c.Set(ContextProjectRole, role.String)
 
 			return next(c)
 		}

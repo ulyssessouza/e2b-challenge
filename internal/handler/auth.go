@@ -2,10 +2,12 @@ package handler
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
@@ -35,6 +37,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		Path:     "/",
 		MaxAge:   600,
 		HttpOnly: true,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -51,8 +54,12 @@ func (h *AuthHandler) Login(c echo.Context) error {
 func (h *AuthHandler) Callback(c echo.Context) error {
 	state := c.QueryParam("state")
 	cookie, err := c.Cookie(stateCookieName)
-	if err != nil || state == "" || cookie.Value == "" || state != cookie.Value {
+	if err != nil || state == "" || cookie.Value == "" || subtle.ConstantTimeCompare([]byte(state), []byte(cookie.Value)) != 1 {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid state parameter")
+	}
+
+	if oauthErr := c.QueryParam("error"); oauthErr != "" {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("authorization failed: %s", oauthErr))
 	}
 
 	code := c.QueryParam("code")
@@ -66,6 +73,7 @@ func (h *AuthHandler) Callback(c echo.Context) error {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -89,10 +97,22 @@ func (h *AuthHandler) Callback(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "token missing subject")
 	}
 
+	// The token came from Hydra's token endpoint, so its signature was
+	// verified there — but still sanity-check the identity-relevant claims
+	// to catch a misconfigured provider before creating user records.
+	if iss, _ := claims["iss"].(string); iss != h.svc.HydraPublicURL() {
+		return echo.NewHTTPError(http.StatusInternalServerError, "unexpected token issuer")
+	}
+	if exp, ok := claims["exp"].(float64); !ok || time.Now().Unix() >= int64(exp) {
+		return echo.NewHTTPError(http.StatusInternalServerError, "token expired or missing expiration")
+	}
+
 	user, err := h.svc.FindOrCreateUser(c.Request().Context(), sub)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("user lookup failed: %v", err))
 	}
+
+	c.Response().Header().Set("Cache-Control", "no-store")
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"access_token": accessToken,

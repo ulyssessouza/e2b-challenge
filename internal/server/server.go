@@ -2,10 +2,11 @@ package server
 
 import (
 	"database/sql"
+	"time"
 
+	"github.com/MicahParks/keyfunc/v3"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"github.com/MicahParks/keyfunc/v3"
 	"github.com/redis/go-redis/v9"
 
 	"e2b-challenge/internal/config"
@@ -21,25 +22,27 @@ func New(cfg *config.Config, sqlDB *sql.DB, rdb *redis.Client, kf keyfunc.Keyfun
 
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestID())
+	e.Use(middleware.BodyLimit("1M"))
+	e.Use(mid.RequestLogger())
 
 	queries := db.New(sqlDB)
 
 	authSvc := service.NewAuthService(queries, cfg)
-	projectSvc := service.NewProjectService(queries)
-	sandboxSvc := service.NewSandboxService(queries)
+	projectSvc := service.NewProjectService(queries, sqlDB)
+	sandboxSvc := service.NewSandboxService(queries, cfg.MaxRunningSandboxesPerProject)
 
 	authH := handler.NewAuthHandler(authSvc)
 	projectH := handler.NewProjectHandler(projectSvc)
 	sandboxH := handler.NewSandboxHandler(sandboxSvc)
-	healthH := handler.NewHealthCheck(sqlDB, rdb)
+	healthH := handler.NewHealthCheck(sqlDB, rdb, kf != nil)
 
 	e.GET("/health", healthH.Check)
-	e.GET("/auth/login", authH.Login)
-	e.GET("/auth/callback", authH.Callback)
+	e.GET("/auth/login", authH.Login, mid.IPRateLimiter(rdb, cfg.AuthRateLimitPerMin, cfg.RateLimitFailOpen))
+	e.GET("/auth/callback", authH.Callback, mid.IPRateLimiter(rdb, cfg.AuthRateLimitPerMin, cfg.RateLimitFailOpen))
 
 	r := e.Group("")
-	r.Use(mid.JWTAuth(kf, queries))
-	r.Use(mid.RateLimiter(rdb, cfg.RateLimitPerMin))
+	r.Use(mid.JWTAuth(kf, mid.NewCachedUserResolver(queries, time.Minute, 10000), cfg.HydraPublicURL, cfg.OAuthClientID))
+	r.Use(mid.RateLimiter(rdb, cfg.RateLimitPerMin, cfg.RateLimitFailOpen))
 
 	r.GET("/v1/projects", projectH.List)
 	r.POST("/v1/projects", projectH.Create)

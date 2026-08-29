@@ -36,4 +36,5 @@ type User struct {
 	Email     string
 	Name      string
 	CreatedAt time.Time
+	OauthSub  string
 }

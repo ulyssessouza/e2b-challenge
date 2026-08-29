@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 const addProjectMember = `-- name: AddProjectMember :exec
@@ -59,54 +60,22 @@ func (q *Queries) GetProjectByID(ctx context.Context, id string) (Project, error
 	return i, err
 }
 
-const getProjectMember = `-- name: GetProjectMember :one
-SELECT project_id, user_id, role FROM project_users WHERE project_id = $1 AND user_id = $2 LIMIT 1
+const getProjectMembership = `-- name: GetProjectMembership :one
+SELECT pu.role FROM projects p
+LEFT JOIN project_users pu ON pu.project_id = p.id AND pu.user_id = $2
+WHERE p.id = $1
 `
 
-type GetProjectMemberParams struct {
-	ProjectID string
-	UserID    string
+type GetProjectMembershipParams struct {
+	ID     string
+	UserID string
 }
 
-func (q *Queries) GetProjectMember(ctx context.Context, arg GetProjectMemberParams) (ProjectUser, error) {
-	row := q.db.QueryRowContext(ctx, getProjectMember, arg.ProjectID, arg.UserID)
-	var i ProjectUser
-	err := row.Scan(&i.ProjectID, &i.UserID, &i.Role)
-	return i, err
-}
-
-const listProjectMembers = `-- name: ListProjectMembers :many
-SELECT u.id, u.email, u.name, u.created_at FROM users u
-JOIN project_users pu ON pu.user_id = u.id
-WHERE pu.project_id = $1
-`
-
-func (q *Queries) ListProjectMembers(ctx context.Context, projectID string) ([]User, error) {
-	rows, err := q.db.QueryContext(ctx, listProjectMembers, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []User
-	for rows.Next() {
-		var i User
-		if err := rows.Scan(
-			&i.ID,
-			&i.Email,
-			&i.Name,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+func (q *Queries) GetProjectMembership(ctx context.Context, arg GetProjectMembershipParams) (sql.NullString, error) {
+	row := q.db.QueryRowContext(ctx, getProjectMembership, arg.ID, arg.UserID)
+	var role sql.NullString
+	err := row.Scan(&role)
+	return role, err
 }
 
 const listProjectsByUser = `-- name: ListProjectsByUser :many

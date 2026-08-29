@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -12,8 +14,9 @@ import (
 )
 
 const (
-	defaultLimit = 50
-	maxLimit     = 200
+	defaultLimit  = 50
+	maxLimit      = 200
+	maxNameLength = 255
 )
 
 type ProjectHandler struct {
@@ -33,7 +36,7 @@ func (h *ProjectHandler) List(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	return c.JSON(http.StatusOK, pagination.NewResponse(projects, p, total))
+	return c.JSON(http.StatusOK, pagination.NewResponse(toProjectDTOs(projects), p, total))
 }
 
 func (h *ProjectHandler) Create(c echo.Context) error {
@@ -48,13 +51,16 @@ func (h *ProjectHandler) Create(c echo.Context) error {
 	if req.Name == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
+	if len(req.Name) > maxNameLength {
+		return echo.NewHTTPError(http.StatusBadRequest, "name too long")
+	}
 
 	project, err := h.svc.Create(c.Request().Context(), req.Name, userID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	return c.JSON(http.StatusCreated, project)
+	return c.JSON(http.StatusCreated, toProjectDTO(*project))
 }
 
 func (h *ProjectHandler) Get(c echo.Context) error {
@@ -62,17 +68,21 @@ func (h *ProjectHandler) Get(c echo.Context) error {
 
 	project, err := h.svc.GetByID(c.Request().Context(), id)
 	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			return echo.NewHTTPError(http.StatusNotFound, "project not found")
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	if project == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "project not found")
-	}
 
-	return c.JSON(http.StatusOK, project)
+	return c.JSON(http.StatusOK, toProjectDTO(*project))
 }
 
 func (h *ProjectHandler) AddMember(c echo.Context) error {
 	projectID := c.Param("id")
+
+	if role, _ := c.Get(middleware.ContextProjectRole).(string); role != "owner" {
+		return echo.NewHTTPError(http.StatusForbidden, "only project owners can add members")
+	}
 
 	var req struct {
 		Email string `json:"email"`
@@ -83,16 +93,23 @@ func (h *ProjectHandler) AddMember(c echo.Context) error {
 	if req.Email == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
 	}
+	if len(req.Email) > maxNameLength {
+		return echo.NewHTTPError(http.StatusBadRequest, "email too long")
+	}
 
 	user, err := h.svc.AddMember(c.Request().Context(), projectID, req.Email, "member")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrConflict):
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		default:
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{
-		"user_id": user.ID,
-		"email":   user.Email,
-	})
+	return c.JSON(http.StatusOK, toUserDTO(*user))
 }
 
 func parsePagination(c echo.Context) pagination.Params {
@@ -108,6 +125,9 @@ func parsePagination(c echo.Context) pagination.Params {
 	}
 
 	if o, err := strconv.Atoi(c.QueryParam("offset")); err == nil && o >= 0 {
+		if o > math.MaxInt32 {
+			o = math.MaxInt32
+		}
 		offset = o
 	}
 

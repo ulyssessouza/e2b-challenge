@@ -8,19 +8,33 @@ import (
 
 	"e2b-challenge/internal/db"
 	"e2b-challenge/internal/pagination"
+
+	"github.com/lib/pq"
 )
 
 type SandboxService struct {
-	q *db.Queries
+	q                    *db.Queries
+	maxRunningPerProject int
 }
 
-func NewSandboxService(q *db.Queries) *SandboxService {
-	return &SandboxService{q: q}
+func NewSandboxService(q *db.Queries, maxRunningPerProject int) *SandboxService {
+	return &SandboxService{q: q, maxRunningPerProject: maxRunningPerProject}
 }
 
-func (s *SandboxService) Create(ctx context.Context, projectID, userID, name, sandboxID string) (*db.Sandbox, error) {
+func (s *SandboxService) Create(ctx context.Context, projectID, userID, name, sandboxID string) (*db.Sandbox, bool, error) {
 	if sandboxID != "" {
-		return s.Restart(ctx, projectID, userID, sandboxID)
+		sandbox, err := s.Restart(ctx, projectID, userID, sandboxID)
+		return sandbox, false, err
+	}
+
+	if s.maxRunningPerProject > 0 {
+		running, err := s.q.CountRunningSandboxesByProject(ctx, projectID)
+		if err != nil {
+			return nil, false, fmt.Errorf("counting running sandboxes: %w", err)
+		}
+		if running >= int64(s.maxRunningPerProject) {
+			return nil, false, fmt.Errorf("%w: project already has %d running sandboxes", ErrQuotaExceeded, running)
+		}
 	}
 
 	sandbox, err := s.q.CreateSandbox(ctx, db.CreateSandboxParams{
@@ -29,9 +43,13 @@ func (s *SandboxService) Create(ctx context.Context, projectID, userID, name, sa
 		Name:      name,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("creating sandbox: %w", err)
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23503" {
+			return nil, false, fmt.Errorf("%w: project", ErrNotFound)
+		}
+		return nil, false, fmt.Errorf("creating sandbox: %w", err)
 	}
-	return &sandbox, nil
+	return &sandbox, true, nil
 }
 
 func (s *SandboxService) Restart(ctx context.Context, projectID, userID, sandboxID string) (*db.Sandbox, error) {
@@ -41,38 +59,33 @@ func (s *SandboxService) Restart(ctx context.Context, projectID, userID, sandbox
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("sandbox not found")
+			return nil, fmt.Errorf("%w: sandbox", ErrNotFound)
 		}
 		return nil, fmt.Errorf("getting sandbox: %w", err)
 	}
 
 	if sandbox.ProjectID != projectID {
-		return nil, fmt.Errorf("sandbox not found in this project")
+		return nil, fmt.Errorf("%w: sandbox does not belong to this project", ErrNotFound)
 	}
 
 	if !sandbox.StoppedAt.Valid {
 		return &sandbox, nil
 	}
 
-	rows, err := s.q.RestartSandbox(ctx, db.RestartSandboxParams{
+	// The UPDATE re-checks membership so a revocation between the read and
+	// the write cannot resurrect the sandbox for a former member.
+	restarted, err := s.q.RestartSandbox(ctx, db.RestartSandboxParams{
 		ID:      sandboxID,
 		Version: sandbox.Version,
+		UserID:  userID,
 	})
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: sandbox was modified concurrently, try again", ErrConflict)
+		}
 		return nil, fmt.Errorf("restarting sandbox: %w", err)
 	}
-	if rows == 0 {
-		return nil, fmt.Errorf("sandbox was modified concurrently, try again")
-	}
-
-	sandbox, err = s.q.GetSandboxByIDAndUser(ctx, db.GetSandboxByIDAndUserParams{
-		ID:     sandboxID,
-		UserID: userID,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("reading restarted sandbox: %w", err)
-	}
-	return &sandbox, nil
+	return &restarted, nil
 }
 
 func (s *SandboxService) ListByProject(ctx context.Context, projectID string, p pagination.Params) ([]db.Sandbox, int64, error) {
@@ -83,6 +96,9 @@ func (s *SandboxService) ListByProject(ctx context.Context, projectID string, p 
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing sandboxes: %w", err)
+	}
+	if sandboxes == nil {
+		sandboxes = []db.Sandbox{}
 	}
 
 	total, err := s.q.CountSandboxesByProject(ctx, projectID)
@@ -109,14 +125,14 @@ func (s *SandboxService) Stop(ctx context.Context, sandboxID, userID string) err
 		})
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("sandbox not found")
+				return fmt.Errorf("%w: sandbox", ErrNotFound)
 			}
 			return fmt.Errorf("checking sandbox: %w", err)
 		}
 		if updated.StoppedAt.Valid {
-			return fmt.Errorf("sandbox already stopped")
+			return fmt.Errorf("%w: sandbox already stopped", ErrConflict)
 		}
-		return fmt.Errorf("sandbox was modified concurrently, try again")
+		return fmt.Errorf("%w: sandbox was modified concurrently, try again", ErrConflict)
 	}
 
 	return nil

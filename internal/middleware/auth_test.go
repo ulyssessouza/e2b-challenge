@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"database/sql"
@@ -23,7 +25,7 @@ type stubUserResolver struct {
 	err  error
 }
 
-func (s stubUserResolver) GetUserByEmail(_ context.Context, _ string) (db.User, error) {
+func (s stubUserResolver) GetUserByOAuthSub(_ context.Context, _ string) (db.User, error) {
 	return s.user, s.err
 }
 
@@ -52,11 +54,22 @@ func testKeyfunc(t *testing.T) (keyfunc.Keyfunc, *rsa.PrivateKey) {
 
 func signToken(t *testing.T, priv *rsa.PrivateKey, sub string) string {
 	t.Helper()
+	return signTokenWithClaims(t, priv, func(claims jwt.MapClaims) {
+		claims["sub"] = sub
+	})
+}
+
+func signTokenWithClaims(t *testing.T, priv *rsa.PrivateKey, mutate func(jwt.MapClaims)) string {
+	t.Helper()
 	claims := jwt.MapClaims{
-		"sub": sub,
+		"sub": "foo@bar.com",
 		"iss": "http://localhost:4444",
+		"aud": "e2b-assignment",
 		"iat": time.Now().Add(-time.Minute).Unix(),
 		"exp": time.Now().Add(time.Hour).Unix(),
+	}
+	if mutate != nil {
+		mutate(claims)
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	tok.Header["kid"] = "test-key"
@@ -69,6 +82,11 @@ func signToken(t *testing.T, priv *rsa.PrivateKey, sub string) string {
 
 func doJWTAuth(t *testing.T, kf keyfunc.Keyfunc, users UserResolver, token string) (echo.Context, *echo.HTTPError) {
 	t.Helper()
+	return doJWTAuthWithIssuer(t, kf, users, "http://localhost:4444", "e2b-assignment", token)
+}
+
+func doJWTAuthWithIssuer(t *testing.T, kf keyfunc.Keyfunc, users UserResolver, issuer, audience, token string) (echo.Context, *echo.HTTPError) {
+	t.Helper()
 	e := echo.New()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	if token != "" {
@@ -78,7 +96,7 @@ func doJWTAuth(t *testing.T, kf keyfunc.Keyfunc, users UserResolver, token strin
 	c := e.NewContext(req, rec)
 
 	called := false
-	handler := JWTAuth(kf, users)(func(c echo.Context) error {
+	handler := JWTAuth(kf, users, issuer, audience)(func(c echo.Context) error {
 		called = true
 		return c.String(http.StatusOK, "ok")
 	})
@@ -103,7 +121,7 @@ func TestJWTAuthMissingHeader(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	handler := JWTAuth(nil, nil)(func(c echo.Context) error {
+	handler := JWTAuth(nil, nil, "http://localhost:4444", "e2b-assignment")(func(c echo.Context) error {
 		return c.String(http.StatusOK, "ok")
 	})
 
@@ -150,5 +168,74 @@ func TestJWTAuthRejectsTokenForUnknownUser(t *testing.T) {
 	}
 	if he.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", he.Code)
+	}
+}
+
+func TestJWTAuthRejectsWrongIssuer(t *testing.T) {
+	kf, priv := testKeyfunc(t)
+	stub := stubUserResolver{user: db.User{ID: "u1", Email: "foo@bar.com"}}
+
+	token := signTokenWithClaims(t, priv, func(claims jwt.MapClaims) {
+		claims["iss"] = "http://evil.example"
+	})
+
+	_, he := doJWTAuth(t, kf, stub, token)
+	if he == nil || he.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for foreign issuer, got %+v", he)
+	}
+}
+
+func TestJWTAuthRejectsWrongAudience(t *testing.T) {
+	kf, priv := testKeyfunc(t)
+	stub := stubUserResolver{user: db.User{ID: "u1", Email: "foo@bar.com"}}
+
+	token := signTokenWithClaims(t, priv, func(claims jwt.MapClaims) {
+		claims["aud"] = "another-app"
+	})
+
+	_, he := doJWTAuth(t, kf, stub, token)
+	if he == nil || he.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for foreign audience, got %+v", he)
+	}
+}
+
+func TestJWTAuthRejectsTokenWithoutExp(t *testing.T) {
+	kf, priv := testKeyfunc(t)
+	stub := stubUserResolver{user: db.User{ID: "u1", Email: "foo@bar.com"}}
+
+	token := signTokenWithClaims(t, priv, func(claims jwt.MapClaims) {
+		delete(claims, "exp")
+	})
+
+	_, he := doJWTAuth(t, kf, stub, token)
+	if he == nil || he.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for token without exp, got %+v", he)
+	}
+}
+
+func TestJWTAuthRejectsUnexpectedAlgorithm(t *testing.T) {
+	kf, _ := testKeyfunc(t)
+	stub := stubUserResolver{user: db.User{ID: "u1", Email: "foo@bar.com"}}
+
+	ecKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating key: %v", err)
+	}
+	claims := jwt.MapClaims{
+		"sub": "foo@bar.com",
+		"iss": "http://localhost:4444",
+		"iat": time.Now().Add(-time.Minute).Unix(),
+		"exp": time.Now().Add(time.Hour).Unix(),
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	tok.Header["kid"] = "test-key"
+	signed, err := tok.SignedString(ecKey)
+	if err != nil {
+		t.Fatalf("signing token: %v", err)
+	}
+
+	_, he := doJWTAuth(t, kf, stub, signed)
+	if he == nil || he.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for ES256 token, got %+v", he)
 	}
 }

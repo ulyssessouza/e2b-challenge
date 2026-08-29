@@ -17,13 +17,16 @@ import (
 const (
 	ContextUserID    = "user_id"
 	ContextUserEmail = "user_email"
+	// ContextProjectRole is set by ProjectMembership to the caller's role
+	// within the project ("owner" or "member").
+	ContextProjectRole = "project_role"
 )
 
 type UserResolver interface {
-	GetUserByEmail(ctx context.Context, email string) (db.User, error)
+	GetUserByOAuthSub(ctx context.Context, sub string) (db.User, error)
 }
 
-func JWTAuth(kf keyfunc.Keyfunc, users UserResolver) echo.MiddlewareFunc {
+func JWTAuth(kf keyfunc.Keyfunc, users UserResolver, issuer, audience string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			authHeader := c.Request().Header.Get("Authorization")
@@ -40,7 +43,12 @@ func JWTAuth(kf keyfunc.Keyfunc, users UserResolver) echo.MiddlewareFunc {
 				return echo.NewHTTPError(http.StatusServiceUnavailable, "authentication service unavailable")
 			}
 
-			token, err := jwt.Parse(parts[1], kf.Keyfunc)
+			token, err := jwt.Parse(parts[1], kf.Keyfunc,
+				jwt.WithValidMethods([]string{"RS256"}),
+				jwt.WithExpirationRequired(),
+				jwt.WithIssuer(issuer),
+				jwt.WithAudience(audience),
+			)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired token")
 			}
@@ -55,7 +63,7 @@ func JWTAuth(kf keyfunc.Keyfunc, users UserResolver) echo.MiddlewareFunc {
 				return echo.NewHTTPError(http.StatusUnauthorized, "token missing subject")
 			}
 
-			user, err := users.GetUserByEmail(c.Request().Context(), sub)
+			user, err := users.GetUserByOAuthSub(c.Request().Context(), sub)
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return echo.NewHTTPError(http.StatusUnauthorized, "user not found")

@@ -19,10 +19,7 @@ WHERE pu.user_id = $1;
 -- name: AddProjectMember :exec
 INSERT INTO project_users (project_id, user_id, role) VALUES ($1, $2, $3);
 
--- name: GetProjectMember :one
-SELECT * FROM project_users WHERE project_id = $1 AND user_id = $2 LIMIT 1;
-
--- name: ListProjectMembers :many
-SELECT u.* FROM users u
-JOIN project_users pu ON pu.user_id = u.id
-WHERE pu.project_id = $1;
+-- name: GetProjectMembership :one
+SELECT pu.role FROM projects p
+LEFT JOIN project_users pu ON pu.project_id = p.id AND pu.user_id = $2
+WHERE p.id = $1;

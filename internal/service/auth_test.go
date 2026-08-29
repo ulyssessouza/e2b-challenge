@@ -1,9 +1,9 @@
 package service
 
 import (
-    "testing"
+	"testing"
 )
 
 func TestFindOrCreateUser(t *testing.T) {
-    t.Skip("integration test — run with compose stack up")
+	t.Skip("integration test — run with compose stack up")
 }

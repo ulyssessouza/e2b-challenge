@@ -1,8 +1,8 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -28,7 +28,7 @@ func (h *SandboxHandler) List(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
-	return c.JSON(http.StatusOK, pagination.NewResponse(sandboxes, p, total))
+	return c.JSON(http.StatusOK, pagination.NewResponse(toSandboxDTOs(sandboxes), p, total))
 }
 
 type createSandboxRequest struct {
@@ -44,16 +44,29 @@ func (h *SandboxHandler) Create(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
-
-	sandbox, err := h.svc.Create(c.Request().Context(), projectID, userID, req.Name, req.SandboxID)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			return echo.NewHTTPError(http.StatusNotFound, err.Error())
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	if len(req.Name) > maxNameLength {
+		return echo.NewHTTPError(http.StatusBadRequest, "name too long")
 	}
 
-	return c.JSON(http.StatusCreated, sandbox)
+	sandbox, created, err := h.svc.Create(c.Request().Context(), projectID, userID, req.Name, req.SandboxID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			return echo.NewHTTPError(http.StatusNotFound, err.Error())
+		case errors.Is(err, service.ErrConflict):
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		case errors.Is(err, service.ErrQuotaExceeded):
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		default:
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+	}
+
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	return c.JSON(status, toSandboxDTO(*sandbox))
 }
 
 func (h *SandboxHandler) Stop(c echo.Context) error {
@@ -62,16 +75,14 @@ func (h *SandboxHandler) Stop(c echo.Context) error {
 
 	err := h.svc.Stop(c.Request().Context(), sandboxID, userID)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
-		}
-		if strings.Contains(err.Error(), "already stopped") {
+		case errors.Is(err, service.ErrConflict):
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		default:
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
-		if strings.Contains(err.Error(), "conflict") {
-			return echo.NewHTTPError(http.StatusConflict, err.Error())
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
 	return c.NoContent(http.StatusNoContent)

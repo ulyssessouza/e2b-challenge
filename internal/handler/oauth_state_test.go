@@ -2,9 +2,11 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -86,5 +88,25 @@ func TestCallbackRejectsMismatchedState(t *testing.T) {
 	}
 	if he.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", he.Code)
+	}
+}
+
+func TestCallbackSurfacesOAuthError(t *testing.T) {
+	h, e := newTestAuthHandler(t)
+	req := httptest.NewRequest(http.MethodGet, "/auth/callback?error=access_denied&state=cccccccccccccccc", nil)
+	req.AddCookie(&http.Cookie{Name: "oauth_state", Value: "cccccccccccccccc"})
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.Callback(c)
+	var he *echo.HTTPError
+	if e2 := errors.As(err, &he); !e2 {
+		t.Fatalf("expected *echo.HTTPError, got %v", err)
+	}
+	if he.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for OAuth error redirect, got %d", he.Code)
+	}
+	if !strings.Contains(fmt.Sprint(he.Message), "access_denied") {
+		t.Fatalf("expected OAuth error name in message, got %v", he.Message)
 	}
 }

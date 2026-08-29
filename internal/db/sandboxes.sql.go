@@ -9,6 +9,17 @@ import (
 	"context"
 )
 
+const countRunningSandboxesByProject = `-- name: CountRunningSandboxesByProject :one
+SELECT COUNT(*) FROM sandboxes WHERE project_id = $1 AND stopped_at IS NULL
+`
+
+func (q *Queries) CountRunningSandboxesByProject(ctx context.Context, projectID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRunningSandboxesByProject, projectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSandboxesByProject = `-- name: CountSandboxesByProject :one
 SELECT COUNT(*) FROM sandboxes WHERE project_id = $1
 `
@@ -113,21 +124,33 @@ func (q *Queries) ListSandboxesByProject(ctx context.Context, arg ListSandboxesB
 	return items, nil
 }
 
-const restartSandbox = `-- name: RestartSandbox :execrows
-UPDATE sandboxes SET stopped_at = NULL, version = version + 1 WHERE id = $1 AND version = $2
+const restartSandbox = `-- name: RestartSandbox :one
+UPDATE sandboxes s SET stopped_at = NULL, version = version + 1
+FROM project_users pu
+WHERE s.id = $1 AND s.version = $2
+  AND pu.project_id = s.project_id AND pu.user_id = $3
+RETURNING s.id, s.project_id, s.user_id, s.created_at, s.stopped_at, s.version, s.name
 `
 
 type RestartSandboxParams struct {
 	ID      string
 	Version int32
+	UserID  string
 }
 
-func (q *Queries) RestartSandbox(ctx context.Context, arg RestartSandboxParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, restartSandbox, arg.ID, arg.Version)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
+func (q *Queries) RestartSandbox(ctx context.Context, arg RestartSandboxParams) (Sandbox, error) {
+	row := q.db.QueryRowContext(ctx, restartSandbox, arg.ID, arg.Version, arg.UserID)
+	var i Sandbox
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.UserID,
+		&i.CreatedAt,
+		&i.StoppedAt,
+		&i.Version,
+		&i.Name,
+	)
+	return i, err
 }
 
 const stopSandbox = `-- name: StopSandbox :execrows

@@ -1,96 +1,97 @@
 package service
 
 import (
-    "context"
-    "database/sql"
-    "encoding/json"
-    "fmt"
-    "io"
-    "net/http"
-    "net/url"
-    "strings"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
-    "e2b-challenge/internal/config"
-    "e2b-challenge/internal/db"
+	"e2b-challenge/internal/config"
+	"e2b-challenge/internal/db"
 )
 
 type AuthService struct {
-    q          *db.Queries
-    cfg        *config.Config
-    httpClient *http.Client
+	q          *db.Queries
+	cfg        *config.Config
+	httpClient *http.Client
 }
 
 func NewAuthService(q *db.Queries, cfg *config.Config) *AuthService {
-    return &AuthService{
-        q:          q,
-        cfg:        cfg,
-        httpClient: &http.Client{},
-    }
+	return &AuthService{
+		q:          q,
+		cfg:        cfg,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
 type tokenResponse struct {
-    AccessToken string `json:"access_token"`
-    IDToken     string `json:"id_token"`
+	AccessToken string `json:"access_token"`
+	IDToken     string `json:"id_token"`
 }
 
-func (s *AuthService) HydraPublicURL() string  { return s.cfg.HydraPublicURL }
-func (s *AuthService) OAuthClientID() string     { return s.cfg.OAuthClientID }
-func (s *AuthService) OAuthRedirectURI() string  { return s.cfg.OAuthRedirectURI }
+// maxTokenResponseBytes caps how much of Hydra's token response we read; real
+// responses are a few KB, so 1 MiB is a generous ceiling against a misbehaving
+// upstream.
+const maxTokenResponseBytes = 1 << 20
+
+func (s *AuthService) HydraPublicURL() string   { return s.cfg.HydraPublicURL }
+func (s *AuthService) OAuthClientID() string    { return s.cfg.OAuthClientID }
+func (s *AuthService) OAuthRedirectURI() string { return s.cfg.OAuthRedirectURI }
 
 func (s *AuthService) ExchangeCode(ctx context.Context, code string) (string, error) {
-    data := url.Values{
-        "grant_type":   {"authorization_code"},
-        "code":         {code},
-        "redirect_uri": {s.cfg.OAuthRedirectURI},
-    }
+	data := url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {code},
+		"redirect_uri": {s.cfg.OAuthRedirectURI},
+	}
 
-    req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-        s.cfg.HydraPublicURL+"/oauth2/token",
-        strings.NewReader(data.Encode()))
-    if err != nil {
-        return "", fmt.Errorf("creating token request: %w", err)
-    }
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		s.cfg.HydraPublicURL+"/oauth2/token",
+		strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("creating token request: %w", err)
+	}
 
-    req.SetBasicAuth(s.cfg.OAuthClientID, s.cfg.OAuthClientSecret)
-    req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(s.cfg.OAuthClientID, s.cfg.OAuthClientSecret)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-    resp, err := s.httpClient.Do(req)
-    if err != nil {
-        return "", fmt.Errorf("token exchange request: %w", err)
-    }
-    defer resp.Body.Close()
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("token exchange request: %w", err)
+	}
+	defer resp.Body.Close()
 
-    body, err := io.ReadAll(resp.Body)
-    if err != nil {
-        return "", fmt.Errorf("reading token response: %w", err)
-    }
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTokenResponseBytes))
+	if err != nil {
+		return "", fmt.Errorf("reading token response: %w", err)
+	}
 
-    if resp.StatusCode != http.StatusOK {
-        return "", fmt.Errorf("token exchange failed (HTTP %d): %s", resp.StatusCode, string(body))
-    }
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("token exchange failed (HTTP %d): %s", resp.StatusCode, string(body))
+	}
 
-    var tr tokenResponse
-    if err := json.Unmarshal(body, &tr); err != nil {
-        return "", fmt.Errorf("parsing token response: %w", err)
-    }
+	var tr tokenResponse
+	if err := json.Unmarshal(body, &tr); err != nil {
+		return "", fmt.Errorf("parsing token response: %w", err)
+	}
 
-    return tr.AccessToken, nil
+	return tr.AccessToken, nil
 }
 
-func (s *AuthService) FindOrCreateUser(ctx context.Context, email string) (*db.User, error) {
-    user, err := s.q.GetUserByEmail(ctx, email)
-    if err == sql.ErrNoRows {
-        user, err = s.q.CreateUser(ctx, db.CreateUserParams{
-            Email: email,
-            Name:  email,
-        })
-        if err != nil {
-            return nil, fmt.Errorf("creating user: %w", err)
-        }
-        return &user, nil
-    }
-    if err != nil {
-        return nil, fmt.Errorf("looking up user: %w", err)
-    }
-    return &user, nil
+func (s *AuthService) FindOrCreateUser(ctx context.Context, sub string) (*db.User, error) {
+	// The OAuth subject is the identity; email/name default to the subject
+	// for this fixture (Hydra's demo login uses the email as the subject).
+	user, err := s.q.UpsertUserByOAuthSub(ctx, db.UpsertUserByOAuthSubParams{
+		OauthSub: sub,
+		Email:    sub,
+		Name:     sub,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("upserting user: %w", err)
+	}
+	return &user, nil
 }

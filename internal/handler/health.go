@@ -14,10 +14,13 @@ import (
 type HealthCheck struct {
 	db  *sql.DB
 	rdb *redis.Client
+	// authReady reports whether the JWKS keyfunc was loaded; without it every
+	// authenticated route returns 503, so health must reflect it.
+	authReady bool
 }
 
-func NewHealthCheck(db *sql.DB, rdb *redis.Client) *HealthCheck {
-	return &HealthCheck{db: db, rdb: rdb}
+func NewHealthCheck(db *sql.DB, rdb *redis.Client, authReady bool) *HealthCheck {
+	return &HealthCheck{db: db, rdb: rdb, authReady: authReady}
 }
 
 type healthStatus struct {
@@ -26,8 +29,7 @@ type healthStatus struct {
 }
 
 type checkState struct {
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
+	Status string `json:"status"`
 }
 
 func (h *HealthCheck) Check(c echo.Context) error {
@@ -37,20 +39,26 @@ func (h *HealthCheck) Check(c echo.Context) error {
 	checks := make(map[string]checkState)
 	overall := "ok"
 
-	dbStatus, dbMsg := h.checkDB(ctx)
-	checks["database"] = checkState{Status: dbStatus, Message: dbMsg}
-	if dbStatus != "up" {
-		overall = "degraded"
-	}
+	dbStatus := h.checkDB(ctx)
+	checks["database"] = checkState{Status: dbStatus}
 
-	redisStatus, redisMsg := h.checkRedis(ctx)
-	checks["redis"] = checkState{Status: redisStatus, Message: redisMsg}
-	if redisStatus != "up" && overall == "ok" {
-		overall = "degraded"
+	redisStatus := h.checkRedis(ctx)
+	checks["redis"] = checkState{Status: redisStatus}
+
+	authStatus := "up"
+	if !h.authReady {
+		authStatus = "down"
 	}
+	checks["auth"] = checkState{Status: authStatus}
 
 	statusCode := http.StatusOK
-	if overall == "degraded" && dbStatus != "up" {
+	overall = "ok"
+	for _, s := range []string{dbStatus, redisStatus, authStatus} {
+		if s != "up" {
+			overall = "degraded"
+		}
+	}
+	if dbStatus != "up" || authStatus != "up" {
 		statusCode = http.StatusServiceUnavailable
 	}
 
@@ -60,21 +68,21 @@ func (h *HealthCheck) Check(c echo.Context) error {
 	})
 }
 
-func (h *HealthCheck) checkDB(ctx context.Context) (string, string) {
+func (h *HealthCheck) checkDB(ctx context.Context) string {
 	if err := h.db.PingContext(ctx); err != nil {
 		slog.Warn("health check: database unreachable", "error", err)
-		return "down", err.Error()
+		return "down"
 	}
-	return "up", ""
+	return "up"
 }
 
-func (h *HealthCheck) checkRedis(ctx context.Context) (string, string) {
+func (h *HealthCheck) checkRedis(ctx context.Context) string {
 	if h.rdb == nil {
-		return "degraded", "not configured"
+		return "degraded"
 	}
 	if err := h.rdb.Ping(ctx).Err(); err != nil {
 		slog.Warn("health check: redis unreachable", "error", err)
-		return "degraded", err.Error()
+		return "degraded"
 	}
-	return "up", ""
+	return "up"
 }
