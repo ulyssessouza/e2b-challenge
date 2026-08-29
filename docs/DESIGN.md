@@ -16,7 +16,7 @@ A multi-tenant control-plane API for sandboxes:
 - **Projects** are the tenancy unit. Members can create sandboxes inside them.
 - **Sandboxes** are DB records with a fake lifecycle (`running` ⇄ `stopped`,
   modeled by `stopped_at`), guarded by conditional updates.
-- Every write is rate-limited (per user) and quota-capped (per project).
+- Every write is rate-limited (per user) and quota-capped by the user's plan (owned projects, running sandboxes).
 
 Non-goals (documented, not accidental): real sandbox orchestration, keyset
 pagination, refresh-token sessions. See IMPROVEMENTS.md.
@@ -290,17 +290,29 @@ unauthenticated and drive Hydra-side work (state minting, token exchange).
 Per-user keying (not global): the README's tenancy model is per-developer
 limits; a global limiter would let one noisy tenant starve others.
 
-### 7.2 Per-project running-sandbox quota
+### 7.2 Quotas: the plans table
 
-`MAX_RUNNING_SANDBOXES_PER_PROJECT` (default 10, 0 = off): `Create` counts
-running sandboxes (`stopped_at IS NULL`) and rejects with 403 when at limit.
-Counts *running only* — stopping a sandbox frees its slot.
+The domain model's "plan with limits" is materialized as a `plans` table
+(seed data: `hobby` 5 projects / 3 running sandboxes, `pro` 25/20,
+`ultimate` unlimited), attached **per user** (`users.plan_id`, default
+hobby). Limits scope over what a user *has*:
+
+- **owned projects** (`project_users.role = 'owner'`) — membership in others'
+  projects is free;
+- **running sandboxes the user created** (`sandboxes.user_id`,
+  `stopped_at IS NULL`), across all projects.
+
+`Create` in both services checks plan vs usage (check-then-create) and
+rejects with 403 naming the plan and the limit. **Restart is not
+quota-checked** — restoring a stopped sandbox is not growth. 0 = unlimited.
 
 | Alternative | Why rejected / deferred |
 |---|---|
-| Plans/limits tables | The README gestures at "a plan with limits"; a `plans` table + Redis counters reconciled against Postgres is the real design (IMPROVEMENTS.md). A single env cap demonstrates enforcement without inventing a billing model. |
-| Strict enforcement (lock the project row / unique slot) | Serializes sandbox creation and complicates the hot path for a demo workload; the count-then-insert race can overshoot by a handful under contention — bounded by request rate, self-heals on stop. |
-| 429 for quota | 429 says "retry later" (time-based); quota exhaustion is a *state* limit → 403 with an explanatory message. |
+| Env-var hard cap (the previous implementation) | No domain grounding, no per-tier story, opaque to operators and users. |
+| Atomic check+insert (`INSERT..SELECT..WHERE count<limit`) | Still racy without serialization; gnarly SQL for no real gain. |
+| Redis atomic counters, reconciled to Postgres | Truly atomic but makes Redis a correctness dependency for data integrity; the plans design (IMPROVEMENTS.md) is where strict enforcement belongs. |
+| Plan per project | Limits per project rather than per account; contradicts the "a user has a plan" model. |
+| Plan management API | Auth scope (who is admin?) beyond the README; limits are editable seed rows. |
 
 ---
 

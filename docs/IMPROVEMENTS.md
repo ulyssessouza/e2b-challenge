@@ -41,15 +41,20 @@ approximate counter).
 
 ## Quotas and "plans"
 
-The README's domain model mentions "a plan with limits". Currently there is a
-per-project running-sandbox cap (config), but a real system needs a `plans`
-table (`max_running_sandboxes`, `max_sandboxes_created_per_day`, ...) bound to
-projects, enforced with:
+The basics exist: a `plans` table (hobby / pro / ultimate seeds) attached
+per user, with owned-project and running-sandbox limits enforced on create
+(check-then-create, so concurrent creates can overshoot by a few). What a
+real system adds on top:
 
-- a Redis counter for the hot path (atomic, like the rate limiter),
-- reconciled asynchronously against Postgres (the source of truth) to heal
-  drift from crashes,
-- rejection with a typed error (`QUOTA_EXCEEDED`) and `Retry-After`.
+- **Plan management**: endpoints/flow to change a user's plan (upgrades,
+  billing) — currently limits are edited as seed rows in SQL.
+- **Strict atomicity**: a Redis counter for the hot path (atomic, like the
+  rate limiter), reconciled asynchronously against Postgres to heal drift
+  from crashes.
+- **More limit kinds**: e.g. `max_sandboxes_created_per_day`, storage/API
+  budgets per tier.
+- **Rejection ergonomics**: typed `QUOTA_EXCEEDED` error code and
+  `Retry-After` on 403s.
 
 ## Rate limiting → sliding window
 

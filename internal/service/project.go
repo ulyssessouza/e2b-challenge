@@ -22,6 +22,14 @@ func NewProjectService(q *db.Queries, db *sql.DB) *ProjectService {
 }
 
 func (s *ProjectService) Create(ctx context.Context, name, ownerID string) (*db.Project, error) {
+	plan, owned, err := s.planUsage(ctx, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	if plan.MaxProjects > 0 && owned >= int64(plan.MaxProjects) {
+		return nil, fmt.Errorf("%w: plan %q allows %d owned projects", ErrQuotaExceeded, plan.Name, plan.MaxProjects)
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("starting transaction: %w", err)
@@ -48,6 +56,21 @@ func (s *ProjectService) Create(ctx context.Context, name, ownerID string) (*db.
 	}
 
 	return &project, nil
+}
+
+// planUsage returns the owner's plan and how many projects they currently
+// own. Enforcement is intentionally check-then-create: concurrent creates
+// may overshoot by a few, bounded by request rate.
+func (s *ProjectService) planUsage(ctx context.Context, ownerID string) (db.Plan, int64, error) {
+	plan, err := s.q.GetUserPlan(ctx, ownerID)
+	if err != nil {
+		return db.Plan{}, 0, fmt.Errorf("getting plan: %w", err)
+	}
+	owned, err := s.q.CountProjectsOwnedByUser(ctx, ownerID)
+	if err != nil {
+		return db.Plan{}, 0, fmt.Errorf("counting owned projects: %w", err)
+	}
+	return plan, owned, nil
 }
 
 func (s *ProjectService) ListByUser(ctx context.Context, userID string, p pagination.Params) ([]db.Project, int64, error) {

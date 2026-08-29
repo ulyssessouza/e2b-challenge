@@ -10,7 +10,7 @@ import (
 )
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, created_at, oauth_sub FROM users WHERE email = $1 LIMIT 1
+SELECT id, email, name, created_at, oauth_sub, plan_id FROM users WHERE email = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -22,12 +22,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Name,
 		&i.CreatedAt,
 		&i.OauthSub,
+		&i.PlanID,
 	)
 	return i, err
 }
 
 const getUserByOAuthSub = `-- name: GetUserByOAuthSub :one
-SELECT id, email, name, created_at, oauth_sub FROM users WHERE oauth_sub = $1 LIMIT 1
+SELECT id, email, name, created_at, oauth_sub, plan_id FROM users WHERE oauth_sub = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByOAuthSub(ctx context.Context, oauthSub string) (User, error) {
@@ -39,6 +40,7 @@ func (q *Queries) GetUserByOAuthSub(ctx context.Context, oauthSub string) (User,
 		&i.Name,
 		&i.CreatedAt,
 		&i.OauthSub,
+		&i.PlanID,
 	)
 	return i, err
 }
@@ -46,7 +48,7 @@ func (q *Queries) GetUserByOAuthSub(ctx context.Context, oauthSub string) (User,
 const upsertUserByOAuthSub = `-- name: UpsertUserByOAuthSub :one
 INSERT INTO users (oauth_sub, email, name) VALUES ($1, $2, $3)
 ON CONFLICT (oauth_sub) DO UPDATE SET oauth_sub = users.oauth_sub
-RETURNING id, email, name, created_at, oauth_sub
+RETURNING id, email, name, created_at, oauth_sub, plan_id
 `
 
 type UpsertUserByOAuthSubParams struct {
@@ -64,6 +66,7 @@ func (q *Queries) UpsertUserByOAuthSub(ctx context.Context, arg UpsertUserByOAut
 		&i.Name,
 		&i.CreatedAt,
 		&i.OauthSub,
+		&i.PlanID,
 	)
 	return i, err
 }

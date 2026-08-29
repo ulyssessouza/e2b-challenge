@@ -57,7 +57,12 @@ func (h *ProjectHandler) Create(c echo.Context) error {
 
 	project, err := h.svc.Create(c.Request().Context(), req.Name, userID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		switch {
+		case errors.Is(err, service.ErrQuotaExceeded):
+			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		default:
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
 	}
 
 	return c.JSON(http.StatusCreated, toProjectDTO(*project))

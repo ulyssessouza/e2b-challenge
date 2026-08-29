@@ -13,7 +13,6 @@ func TestLoad(t *testing.T) {
 	t.Setenv("OAUTH_CLIENT_SECRET", "test-secret")
 	t.Setenv("OAUTH_REDIRECT_URI", "http://localhost:9090/auth/callback")
 	t.Setenv("RATE_LIMIT_PER_MIN", "500")
-	t.Setenv("MAX_RUNNING_SANDBOXES_PER_PROJECT", "7")
 
 	cfg := Load()
 
@@ -40,8 +39,5 @@ func TestLoad(t *testing.T) {
 	}
 	if cfg.RateLimitPerMin != 500 {
 		t.Errorf("expected RateLimitPerMin 500, got %d", cfg.RateLimitPerMin)
-	}
-	if cfg.MaxRunningSandboxesPerProject != 7 {
-		t.Errorf("expected MaxRunningSandboxesPerProject 7, got %d", cfg.MaxRunningSandboxesPerProject)
 	}
 }

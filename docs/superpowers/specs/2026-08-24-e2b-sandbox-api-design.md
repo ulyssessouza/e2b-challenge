@@ -129,7 +129,7 @@ All queries live in `internal/db/queries/*.sql` and are processed by sqlc into `
 
 Implemented since this spec was written: offset pagination on list endpoints,
 structured error responses, request logging, rate-limit headers, sandbox
-quota per project, and OAuth `sub`-keyed identity (see docs/IMPROVEMENTS.md
+plan-based quotas, and OAuth `sub`-keyed identity (see docs/IMPROVEMENTS.md
 for what remains).
 
 - Refresh token handling (tokens expire; need rotation and storage)

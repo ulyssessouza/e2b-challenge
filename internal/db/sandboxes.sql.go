@@ -20,6 +20,17 @@ func (q *Queries) CountRunningSandboxesByProject(ctx context.Context, projectID 
 	return count, err
 }
 
+const countRunningSandboxesByUser = `-- name: CountRunningSandboxesByUser :one
+SELECT COUNT(*) FROM sandboxes WHERE user_id = $1 AND stopped_at IS NULL
+`
+
+func (q *Queries) CountRunningSandboxesByUser(ctx context.Context, userID string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRunningSandboxesByUser, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSandboxesByProject = `-- name: CountSandboxesByProject :one
 SELECT COUNT(*) FROM sandboxes WHERE project_id = $1
 `

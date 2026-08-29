@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+type Plan struct {
+	ID                  string
+	Name                string
+	MaxProjects         int32
+	MaxRunningSandboxes int32
+	CreatedAt           time.Time
+}
+
 type Project struct {
 	ID        string
 	Name      string
@@ -36,4 +44,5 @@ type User struct {
 	Name      string
 	CreatedAt time.Time
 	OauthSub  string
+	PlanID    string
 }

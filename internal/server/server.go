@@ -29,7 +29,7 @@ func New(cfg *config.Config, sqlDB *sql.DB, rdb *redis.Client, kf keyfunc.Keyfun
 
 	authSvc := service.NewAuthService(queries, cfg)
 	projectSvc := service.NewProjectService(queries, sqlDB)
-	sandboxSvc := service.NewSandboxService(queries, cfg.MaxRunningSandboxesPerProject)
+	sandboxSvc := service.NewSandboxService(queries)
 
 	authH := handler.NewAuthHandler(authSvc)
 	projectH := handler.NewProjectHandler(projectSvc)

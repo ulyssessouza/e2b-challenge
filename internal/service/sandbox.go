@@ -13,12 +13,11 @@ import (
 )
 
 type SandboxService struct {
-	q                    *db.Queries
-	maxRunningPerProject int
+	q *db.Queries
 }
 
-func NewSandboxService(q *db.Queries, maxRunningPerProject int) *SandboxService {
-	return &SandboxService{q: q, maxRunningPerProject: maxRunningPerProject}
+func NewSandboxService(q *db.Queries) *SandboxService {
+	return &SandboxService{q: q}
 }
 
 func (s *SandboxService) Create(ctx context.Context, projectID, userID, name, sandboxID string) (*db.Sandbox, bool, error) {
@@ -27,14 +26,16 @@ func (s *SandboxService) Create(ctx context.Context, projectID, userID, name, sa
 		return sandbox, false, err
 	}
 
-	if s.maxRunningPerProject > 0 {
-		running, err := s.q.CountRunningSandboxesByProject(ctx, projectID)
-		if err != nil {
-			return nil, false, fmt.Errorf("counting running sandboxes: %w", err)
-		}
-		if running >= int64(s.maxRunningPerProject) {
-			return nil, false, fmt.Errorf("%w: project already has %d running sandboxes", ErrQuotaExceeded, running)
-		}
+	plan, err := s.q.GetUserPlan(ctx, userID)
+	if err != nil {
+		return nil, false, fmt.Errorf("getting plan: %w", err)
+	}
+	running, err := s.q.CountRunningSandboxesByUser(ctx, userID)
+	if err != nil {
+		return nil, false, fmt.Errorf("counting running sandboxes: %w", err)
+	}
+	if plan.MaxRunningSandboxes > 0 && running >= int64(plan.MaxRunningSandboxes) {
+		return nil, false, fmt.Errorf("%w: plan %q allows %d running sandboxes", ErrQuotaExceeded, plan.Name, plan.MaxRunningSandboxes)
 	}
 
 	sandbox, err := s.q.CreateSandbox(ctx, db.CreateSandboxParams{
