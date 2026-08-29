@@ -11,18 +11,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// ratelimitScript increments the window counter and sets its TTL in a single
-// atomic operation. Doing INCR and EXPIRE as separate commands can leave the
-// key without a TTL if the process dies in between, which would both leak the
-// key and permanently rate-limit the user for that window.
-var ratelimitScript = redis.NewScript(`
-local count = redis.call('INCR', KEYS[1])
-if count == 1 then
-	redis.call('PEXPIRE', KEYS[1], ARGV[1])
-end
-return {count, redis.call('PTTL', KEYS[1])}
-`)
-
 func RateLimiter(rdb *redis.Client, limit int, failOpen bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -53,10 +41,16 @@ func IPRateLimiter(rdb *redis.Client, limit int, failOpen bool) echo.MiddlewareF
 	}
 }
 
+// enforceRateLimit counts requests in fixed one-minute windows. INCR and
+// EXPIRE are deliberately issued as separate, non-atomic commands: if the
+// process dies in between, the window key is left without a TTL. The worst
+// case is one leaked key (and a throttled user for that window) until Redis
+// is flushed — an accepted trade-off here; a Lua script would make it atomic
+// if it ever matters.
 func enforceRateLimit(next echo.HandlerFunc, c echo.Context, rdb *redis.Client, key string, limit int, failOpen bool) error {
 	ctx := c.Request().Context()
 
-	res, err := ratelimitScript.Run(ctx, rdb, []string{key}, (time.Minute / time.Millisecond)).Slice()
+	count, err := rdb.Incr(ctx, key).Result()
 	if err != nil {
 		if failOpen {
 			slog.Warn("rate limiter: redis unreachable, allowing request", "error", err)
@@ -66,7 +60,9 @@ func enforceRateLimit(next echo.HandlerFunc, c echo.Context, rdb *redis.Client, 
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "rate limiter unavailable")
 	}
 
-	count, ttlMs := toInt64(res[0]), toInt64(res[1])
+	if count == 1 {
+		rdb.Expire(ctx, key, time.Minute)
+	}
 
 	c.Response().Header().Set("X-RateLimit-Limit", strconv.Itoa(limit))
 	remaining := int64(limit) - count
@@ -76,7 +72,11 @@ func enforceRateLimit(next echo.HandlerFunc, c echo.Context, rdb *redis.Client, 
 	c.Response().Header().Set("X-RateLimit-Remaining", strconv.FormatInt(remaining, 10))
 
 	if count > int64(limit) {
-		retryAfter := int64(math.Ceil(float64(ttlMs) / 1000))
+		ttl, err := rdb.TTL(ctx, key).Result()
+		if err != nil || ttl <= 0 {
+			ttl = time.Minute
+		}
+		retryAfter := int64(math.Ceil(ttl.Seconds()))
 		if retryAfter < 1 {
 			retryAfter = 1
 		}
@@ -85,15 +85,4 @@ func enforceRateLimit(next echo.HandlerFunc, c echo.Context, rdb *redis.Client, 
 	}
 
 	return next(c)
-}
-
-func toInt64(v interface{}) int64 {
-	switch n := v.(type) {
-	case int64:
-		return n
-	case int:
-		return int64(n)
-	default:
-		return 0
-	}
 }
