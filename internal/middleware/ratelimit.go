@@ -65,10 +65,7 @@ func enforceRateLimit(next echo.HandlerFunc, c echo.Context, rdb *redis.Client, 
 	}
 
 	c.Response().Header().Set("X-RateLimit-Limit", strconv.Itoa(limit))
-	remaining := int64(limit) - count
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := max(int64(limit)-count, 0)
 	c.Response().Header().Set("X-RateLimit-Remaining", strconv.FormatInt(remaining, 10))
 
 	if count > int64(limit) {
@@ -76,10 +73,7 @@ func enforceRateLimit(next echo.HandlerFunc, c echo.Context, rdb *redis.Client, 
 		if err != nil || ttl <= 0 {
 			ttl = time.Minute
 		}
-		retryAfter := int64(math.Ceil(ttl.Seconds()))
-		if retryAfter < 1 {
-			retryAfter = 1
-		}
+		retryAfter := max(int64(math.Ceil(ttl.Seconds())), 1)
 		c.Response().Header().Set("Retry-After", strconv.FormatInt(retryAfter, 10))
 		return echo.NewHTTPError(http.StatusTooManyRequests, "rate limit exceeded")
 	}

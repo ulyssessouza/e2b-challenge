@@ -32,7 +32,7 @@ func (q *Queries) CountSandboxesByProject(ctx context.Context, projectID string)
 }
 
 const createSandbox = `-- name: CreateSandbox :one
-INSERT INTO sandboxes (project_id, user_id, name) VALUES ($1, $2, $3) RETURNING id, project_id, user_id, created_at, stopped_at, version, name
+INSERT INTO sandboxes (project_id, user_id, name) VALUES ($1, $2, $3) RETURNING id, project_id, user_id, created_at, stopped_at, name
 `
 
 type CreateSandboxParams struct {
@@ -50,14 +50,13 @@ func (q *Queries) CreateSandbox(ctx context.Context, arg CreateSandboxParams) (S
 		&i.UserID,
 		&i.CreatedAt,
 		&i.StoppedAt,
-		&i.Version,
 		&i.Name,
 	)
 	return i, err
 }
 
 const getSandboxByIDAndUser = `-- name: GetSandboxByIDAndUser :one
-SELECT s.id, s.project_id, s.user_id, s.created_at, s.stopped_at, s.version, s.name FROM sandboxes s
+SELECT s.id, s.project_id, s.user_id, s.created_at, s.stopped_at, s.name FROM sandboxes s
 JOIN project_users pu ON pu.project_id = s.project_id
 WHERE s.id = $1 AND pu.user_id = $2
 `
@@ -76,14 +75,13 @@ func (q *Queries) GetSandboxByIDAndUser(ctx context.Context, arg GetSandboxByIDA
 		&i.UserID,
 		&i.CreatedAt,
 		&i.StoppedAt,
-		&i.Version,
 		&i.Name,
 	)
 	return i, err
 }
 
 const listSandboxesByProject = `-- name: ListSandboxesByProject :many
-SELECT id, project_id, user_id, created_at, stopped_at, version, name FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC
+SELECT id, project_id, user_id, created_at, stopped_at, name FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
 `
 
@@ -108,7 +106,6 @@ func (q *Queries) ListSandboxesByProject(ctx context.Context, arg ListSandboxesB
 			&i.UserID,
 			&i.CreatedAt,
 			&i.StoppedAt,
-			&i.Version,
 			&i.Name,
 		); err != nil {
 			return nil, err
@@ -125,21 +122,20 @@ func (q *Queries) ListSandboxesByProject(ctx context.Context, arg ListSandboxesB
 }
 
 const restartSandbox = `-- name: RestartSandbox :one
-UPDATE sandboxes s SET stopped_at = NULL, version = version + 1
+UPDATE sandboxes s SET stopped_at = NULL
 FROM project_users pu
-WHERE s.id = $1 AND s.version = $2
-  AND pu.project_id = s.project_id AND pu.user_id = $3
-RETURNING s.id, s.project_id, s.user_id, s.created_at, s.stopped_at, s.version, s.name
+WHERE s.id = $1 AND s.stopped_at IS NOT NULL
+  AND pu.project_id = s.project_id AND pu.user_id = $2
+RETURNING s.id, s.project_id, s.user_id, s.created_at, s.stopped_at, s.name
 `
 
 type RestartSandboxParams struct {
-	ID      string
-	Version int32
-	UserID  string
+	ID     string
+	UserID string
 }
 
 func (q *Queries) RestartSandbox(ctx context.Context, arg RestartSandboxParams) (Sandbox, error) {
-	row := q.db.QueryRowContext(ctx, restartSandbox, arg.ID, arg.Version, arg.UserID)
+	row := q.db.QueryRowContext(ctx, restartSandbox, arg.ID, arg.UserID)
 	var i Sandbox
 	err := row.Scan(
 		&i.ID,
@@ -147,14 +143,13 @@ func (q *Queries) RestartSandbox(ctx context.Context, arg RestartSandboxParams) 
 		&i.UserID,
 		&i.CreatedAt,
 		&i.StoppedAt,
-		&i.Version,
 		&i.Name,
 	)
 	return i, err
 }
 
 const stopSandbox = `-- name: StopSandbox :execrows
-UPDATE sandboxes s SET stopped_at = now(), version = version + 1
+UPDATE sandboxes s SET stopped_at = now()
 FROM project_users pu
 WHERE s.id = $1 AND pu.project_id = s.project_id AND pu.user_id = $2
   AND s.stopped_at IS NULL

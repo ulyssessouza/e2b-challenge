@@ -15,7 +15,7 @@ A multi-tenant control-plane API for sandboxes:
   the API with the resulting JWT access token.
 - **Projects** are the tenancy unit. Members can create sandboxes inside them.
 - **Sandboxes** are DB records with a fake lifecycle (`running` ⇄ `stopped`,
-  modeled by `stopped_at`), guarded by optimistic concurrency.
+  modeled by `stopped_at`), guarded by conditional updates.
 - Every write is rate-limited (per user) and quota-capped (per project).
 
 Non-goals (documented, not accidental): real sandbox orchestration, keyset
@@ -102,19 +102,27 @@ addition** — the design spec's `JWT + Owner` contract. Any member could add
 members (friendlier for collaboration), but then `role` is dead schema and
 "snap your own friends in" becomes a privilege-escalation foot-gun.
 
-### 3.4 Sandbox state: `stopped_at TIMESTAMPTZ` + `version INTEGER`
+### 3.4 Sandbox state: `stopped_at TIMESTAMPTZ`, no status column
 
 **Decision: state is the *presence* of `stopped_at`, not a status string.**
 
-An earlier migration (000004) dropped a `status` column in favor of the
-timestamp. Two columns encoding one fact invite drift (`status='stopped'`,
+An earlier migration dropped a `status` column in favor of the timestamp.
+Two columns encoding one fact invite drift (`status='stopped'`,
 `stopped_at=NULL`); the timestamp also records *when* it stopped for free.
 `stopped_at IS NULL` doubles as the "running" predicate for the quota count,
 and partial index opportunities follow from the same predicate.
 
-`version` enables optimistic concurrency (§8.4). `ON DELETE CASCADE` on
-`sandboxes.project_id`/`project_users` keeps deletes one-statement at the DB
-level instead of app-level loops that can half-fail.
+**Concurrency: guarded conditional updates, no version column.** Each
+transition re-checks its precondition inside the UPDATE, under the row lock:
+stop is guarded by `stopped_at IS NULL`, restart by `stopped_at IS NOT NULL`
+(which also re-checks membership, so a revocation between read and write
+cannot resurrect the sandbox). For this two-state, idempotent-shaped
+lifecycle that is sufficient — competing writes converge instead of
+doubling. A `version` column / `If-Match` scheme is deliberately omitted;
+when transitions become non-idempotent or side-effectful (a real
+orchestrator), reintroduce it — see IMPROVEMENTS.md.
+`ON DELETE CASCADE` on `sandboxes.project_id`/`project_users` keeps deletes
+one-statement at the DB level instead of app-level loops that can half-fail.
 
 ### 3.5 `TEXT` UUID PKs
 
@@ -345,7 +353,7 @@ distinguishes 201 (new resource) from 200 (state transition) honestly.
 `201` created / `200` read or state-transition / `204` stop / `400` malformed
 input / `401` auth / `403` non-member, non-owner, quota / `404` missing
 (including cross-tenant lookups — no existence leak) / `409` duplicate member,
-re-stop, CAS retry / `429` rate limit / `503` auth or limiter unavailable.
+re-stop, guarded-write conflict / `429` rate limit / `503` auth or limiter unavailable.
 
 ---
 
@@ -434,7 +442,7 @@ here.
 | Alternative | Why rejected / deferred |
 |---|---|
 | testcontainers for integration tests | Real DB coverage in CI without compose; worthwhile, deferred to keep the submission dependency-light. |
-| Mock-heavy service tests | The interesting behavior (CAS, membership joins, quotas) lives in SQL — mocks would test the mock. The E2E script covers those paths for real. |
+| Mock-heavy service tests | The interesting behavior (guarded transitions, membership joins, quotas) lives in SQL — mocks would test the mock. The E2E script covers those paths for real. |
 
 ---
 

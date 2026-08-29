@@ -27,7 +27,6 @@ type Sandbox struct {
 	UserID    string
 	CreatedAt time.Time
 	StoppedAt sql.NullTime
-	Version   int32
 	Name      string
 }
 

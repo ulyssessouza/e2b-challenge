@@ -17,14 +17,14 @@ SELECT COUNT(*) FROM sandboxes WHERE project_id = $1;
 SELECT COUNT(*) FROM sandboxes WHERE project_id = $1 AND stopped_at IS NULL;
 
 -- name: StopSandbox :execrows
-UPDATE sandboxes s SET stopped_at = now(), version = version + 1
+UPDATE sandboxes s SET stopped_at = now()
 FROM project_users pu
 WHERE s.id = $1 AND pu.project_id = s.project_id AND pu.user_id = $2
   AND s.stopped_at IS NULL;
 
 -- name: RestartSandbox :one
-UPDATE sandboxes s SET stopped_at = NULL, version = version + 1
+UPDATE sandboxes s SET stopped_at = NULL
 FROM project_users pu
-WHERE s.id = $1 AND s.version = $2
-  AND pu.project_id = s.project_id AND pu.user_id = $3
-RETURNING s.id, s.project_id, s.user_id, s.created_at, s.stopped_at, s.version, s.name;
+WHERE s.id = $1 AND s.stopped_at IS NOT NULL
+  AND pu.project_id = s.project_id AND pu.user_id = $2
+RETURNING s.id, s.project_id, s.user_id, s.created_at, s.stopped_at, s.name;

@@ -72,16 +72,29 @@ func (s *SandboxService) Restart(ctx context.Context, projectID, userID, sandbox
 		return &sandbox, nil
 	}
 
-	// The UPDATE re-checks membership so a revocation between the read and
-	// the write cannot resurrect the sandbox for a former member.
+	// The guarded UPDATE re-checks membership and the stopped state at write
+	// time, so a revocation between the read and the write cannot resurrect
+	// the sandbox for a former member, and a concurrent restart converges to
+	// a no-op instead of doubling.
 	restarted, err := s.q.RestartSandbox(ctx, db.RestartSandboxParams{
-		ID:      sandboxID,
-		Version: sandbox.Version,
-		UserID:  userID,
+		ID:     sandboxID,
+		UserID: userID,
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("%w: sandbox was modified concurrently, try again", ErrConflict)
+			// Lost the race: the sandbox is running again (someone else
+			// restarted it) or it is gone. Re-read for a truthful answer.
+			sandbox, err = s.q.GetSandboxByIDAndUser(ctx, db.GetSandboxByIDAndUserParams{
+				ID:     sandboxID,
+				UserID: userID,
+			})
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil, fmt.Errorf("%w: sandbox", ErrNotFound)
+				}
+				return nil, fmt.Errorf("reading sandbox: %w", err)
+			}
+			return &sandbox, nil
 		}
 		return nil, fmt.Errorf("restarting sandbox: %w", err)
 	}
@@ -134,6 +147,5 @@ func (s *SandboxService) Stop(ctx context.Context, sandboxID, userID string) err
 		}
 		return fmt.Errorf("%w: sandbox was modified concurrently, try again", ErrConflict)
 	}
-
 	return nil
 }

@@ -66,8 +66,13 @@ a sliding-window Lua script smooths this without extra round-trips.
 
 ## Sandbox lifecycle as a system
 
-Sandboxes here are DB rows with a fake lifecycle. In reality they are a state
-machine driven by an orchestrator:
+Sandboxes here are DB rows with a fake lifecycle, guarded by conditional
+updates (each write applies only if the targeted state still holds at write
+time) — sufficient for this two-state, idempotent-shaped lifecycle. Optimistic
+locking (a `version` column checked in the write, exposed as HTTP `ETag` /
+`If-Match`) should be reintroduced when transitions become non-idempotent or
+carry side effects (a real orchestrator): it turns a stale decision into an
+explicit 409-and-retry instead of a silent convergence.
 
 - an event/outbox pattern (`sandbox.created/started/stopped`) publishing to a
   stream for consumers (webhooks, billing, metrics),
