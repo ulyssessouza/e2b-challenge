@@ -67,8 +67,7 @@ mise run test
 │   ├── service/         # business logic
 │   ├── server/          # Echo server setup
 │   ├── jwks/            # JWKS key provider
-│   ├── observability/   # OpenTelemetry setup
-│   └── pagination/      # cursor/offset helpers
+│   └── pagination/      # offset pagination envelope
 ```
 
 ## OAuth test credentials

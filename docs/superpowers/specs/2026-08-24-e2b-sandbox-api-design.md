@@ -127,9 +127,13 @@ All queries live in `internal/db/queries/*.sql` and are processed by sqlc into `
 
 ## What's Not Included (Future Improvements)
 
+Implemented since this spec was written: offset pagination on list endpoints,
+structured error responses, request logging, rate-limit headers, sandbox
+quota per project, and OAuth `sub`-keyed identity (see docs/IMPROVEMENTS.md
+for what remains).
+
 - Refresh token handling (tokens expire; need rotation and storage)
-- Pagination on list endpoints
+- Keyset (cursor) pagination for very large collections
 - Soft-delete / audit logging for sandboxes
-- Structured error responses (RFC 7807 Problem Details)
 - OpenAPI / swagger spec generation
 - Metrics / tracing instrumentation
