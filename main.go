@@ -17,6 +17,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"github.com/labstack/echo/v4"
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 
@@ -34,6 +35,21 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	sqlDB := openDB(cfg)
+	rdb := connectRedis(ctx, cfg)
+	kf := connectJWKS(ctx, cfg)
+
+	e := server.New(cfg, sqlDB, rdb, kf)
+	runServer(e, cfg, func() {
+		cancel()
+		sqlDB.Close()
+		rdb.Close()
+	})
+}
+
+// openDB opens the connection pool, applies bounds, verifies connectivity and
+// runs migrations. Any failure here is fatal: the service cannot start.
+func openDB(cfg *config.Config) *sql.DB {
 	sqlDB, err := sql.Open("postgres", cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("failed to open database", "error", err)
@@ -48,24 +64,35 @@ func main() {
 		slog.Error("failed to ping database", "error", err)
 		os.Exit(1)
 	}
-
 	if err := runMigrations(cfg.DatabaseURL); err != nil {
 		slog.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}
+	return sqlDB
+}
 
+// connectRedis returns a client; an unreachable Redis degrades to disabled
+// rate limiting (fail-open) rather than aborting startup.
+func connectRedis(ctx context.Context, cfg *config.Config) *redis.Client {
 	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		slog.Warn("redis unavailable, rate limiting disabled", "error", err)
 	}
+	return rdb
+}
 
+// connectJWKS retries briefly so a slow-starting Hydra does not leave auth
+// hard-down until a manual restart. Once the attempts are spent it returns
+// nil and protected routes fail closed (503) — see server.JWTAuth.
+func connectJWKS(ctx context.Context, cfg *config.Config) keyfunc.Keyfunc {
+	const attempts = 5
 	var kf keyfunc.Keyfunc
-	for attempt := 1; attempt <= 5; attempt++ {
-		kf, err = jwks.NewProvider(ctx, cfg.HydraPublicURL+"/.well-known/jwks.json")
-		if err == nil {
-			break
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if kf, err = jwks.NewProvider(ctx, cfg.HydraPublicURL+"/.well-known/jwks.json"); err == nil {
+			return kf
 		}
-		if attempt == 5 {
+		if attempt == attempts {
 			break
 		}
 		slog.Warn("hydra unavailable, retrying", "attempt", attempt, "error", err)
@@ -76,12 +103,13 @@ func main() {
 		case <-time.After(time.Duration(attempt) * time.Second):
 		}
 	}
-	if kf == nil {
-		slog.Warn("hydra unavailable, protected routes will fail closed", "error", err)
-	}
+	slog.Warn("hydra unavailable, protected routes will fail closed", "error", err)
+	return nil
+}
 
-	e := server.New(cfg, sqlDB, rdb, kf)
-
+// runServer starts the HTTP server and blocks until a signal arrives, then
+// drains in-flight requests within a deadline and runs the cleanup.
+func runServer(e *echo.Echo, cfg *config.Config, cleanup func()) {
 	// Timeouts protect the server from slow clients (slowloris-style
 	// connection exhaustion); echo.Start alone would use zero timeouts.
 	srv := &http.Server{
@@ -106,15 +134,13 @@ func main() {
 	<-quit
 	slog.Info("shutting down...")
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	if err := e.Shutdown(shutdownCtx); err != nil {
 		slog.Warn("graceful shutdown failed", "error", err)
 	}
 
-	cancel()
-	sqlDB.Close()
-	rdb.Close()
+	cleanup()
 	slog.Info("shutdown complete")
 }
 
