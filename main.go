@@ -89,18 +89,17 @@ func connectJWKS(ctx context.Context, cfg *config.Config) keyfunc.Keyfunc {
 	var kf keyfunc.Keyfunc
 	var err error
 	for attempt := 1; attempt <= attempts; attempt++ {
+		if attempt > 1 {
+			slog.Warn("hydra unavailable, retrying", "attempt", attempt, "error", err)
+			select {
+			case <-ctx.Done():
+				slog.Error("shutdown while waiting for hydra")
+				os.Exit(1)
+			case <-time.After(time.Duration(attempt-1) * time.Second):
+			}
+		}
 		if kf, err = jwks.NewProvider(ctx, cfg.HydraPublicURL+"/.well-known/jwks.json"); err == nil {
 			return kf
-		}
-		if attempt == attempts {
-			break
-		}
-		slog.Warn("hydra unavailable, retrying", "attempt", attempt, "error", err)
-		select {
-		case <-ctx.Done():
-			slog.Error("shutdown while waiting for hydra")
-			os.Exit(1)
-		case <-time.After(time.Duration(attempt) * time.Second):
 		}
 	}
 	slog.Warn("hydra unavailable, protected routes will fail closed", "error", err)
