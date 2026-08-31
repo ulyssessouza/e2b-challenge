@@ -42,6 +42,6 @@ type User struct {
 	ID        string
 	Email     string
 	Name      string
-	CreatedAt time.Time
 	PlanID    string
+	CreatedAt time.Time
 }

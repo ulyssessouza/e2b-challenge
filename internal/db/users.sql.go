@@ -10,7 +10,7 @@ import (
 )
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, created_at, plan_id FROM users WHERE email = $1 LIMIT 1
+SELECT id, email, name, plan_id, created_at FROM users WHERE email = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -20,8 +20,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.ID,
 		&i.Email,
 		&i.Name,
-		&i.CreatedAt,
 		&i.PlanID,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -29,7 +29,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 const upsertUserByEmail = `-- name: UpsertUserByEmail :one
 INSERT INTO users (email, name) VALUES ($1, $2)
 ON CONFLICT (email) DO UPDATE SET email = users.email
-RETURNING id, email, name, created_at, plan_id
+RETURNING id, email, name, plan_id, created_at
 `
 
 type UpsertUserByEmailParams struct {
@@ -47,8 +47,8 @@ func (q *Queries) UpsertUserByEmail(ctx context.Context, arg UpsertUserByEmailPa
 		&i.ID,
 		&i.Email,
 		&i.Name,
-		&i.CreatedAt,
 		&i.PlanID,
+		&i.CreatedAt,
 	)
 	return i, err
 }

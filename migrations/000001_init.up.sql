@@ -1,10 +1,3 @@
-CREATE TABLE users (
-    id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    email      TEXT NOT NULL UNIQUE,
-    name       TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
 CREATE TABLE plans (
     id                    TEXT PRIMARY KEY,
     name                  TEXT NOT NULL UNIQUE,
@@ -17,6 +10,14 @@ INSERT INTO plans (id, name, max_projects, max_running_sandboxes) VALUES
     ('plan-hobby',    'hobby',    5,  3),
     ('plan-pro',      'pro',     25, 20),
     ('plan-ultimate', 'ultimate', 0,  0);
+
+CREATE TABLE users (
+    id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    email      TEXT NOT NULL UNIQUE,
+    name       TEXT NOT NULL,
+    plan_id    TEXT NOT NULL DEFAULT 'plan-hobby' REFERENCES plans(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE projects (
     id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -35,8 +36,6 @@ CREATE TABLE project_users (
 -- project_users PK is (project_id, user_id); user-scoped lookups need the
 -- reverse ordering to avoid sequential scans when listing a user's projects.
 CREATE INDEX idx_project_users_user_id ON project_users (user_id, project_id);
-
-ALTER TABLE users ADD COLUMN plan_id TEXT NOT NULL DEFAULT 'plan-hobby' REFERENCES plans(id);
 
 CREATE TABLE sandboxes (
     id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
