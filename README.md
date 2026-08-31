@@ -42,7 +42,7 @@ End-to-end suites (require the running server; safe to re-run — each run
 uses throwaway users):
 
 ```sh
-scripts/e2e.sh            # 36 checks: OAuth flow, authz matrix, sandbox lifecycle
+scripts/e2e.sh            # 43 checks: OAuth flow, authz matrix, lifecycle, name rules
 scripts/quota_e2e.sh      # 18 checks: plan limits, slot freeing, restart-at-cap
 ```
 
@@ -81,3 +81,5 @@ solution.
   the tradeoffs against the alternatives considered
 - [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md) — deliberately unimplemented
   ideas and how they would be built
+- `docs/superpowers/` — historical planning artifacts from the build process
+  (superseded by DESIGN.md where they disagree)

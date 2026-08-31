@@ -63,29 +63,25 @@ a sliding-window Lua script smooths this without extra round-trips.
 
 ## Identity
 
-- Identity is keyed by `users.email`, which is seeded from the JWT subject —
-  correct here because the fixture's Hydra sets `sub` = the typed email. A
-  real IdP issues opaque, immutable subjects that outlive email changes, so
-  production adds a dedicated `oauth_sub` column (unique, backfilled),
-  resolves JWTs by it, and takes `email` from the ID token / `/userinfo`
-  instead of guessing it.
+- Identity is keyed by `users.email`, seeded from the JWT subject — correct
+  here because the fixture's Hydra sets `sub` = the typed email. A real IdP
+  issues opaque, immutable subjects, so production adds a dedicated
+  `oauth_sub` column (unique), resolves JWTs by it, and takes `email` from
+  the ID token / `/userinfo` — which also fixes the edge where two subjects
+  share an email (the `users.email UNIQUE` constraint would 500 the second
+  login today). Minor: the login upsert's no-op `DO UPDATE` (needed to get
+  the row back from `RETURNING`) could become `DO NOTHING` + re-select.
 - Add PKCE to the authorization-code flow (cheap, protects public clients).
-- The login upsert does a no-op `DO UPDATE` per returning login (to get the
-  row back from `RETURNING`); `DO NOTHING` + re-select avoids the dead-tuple
-  write. Also: with a real IdP where two subjects share an email, the
-  `users.email UNIQUE` constraint would 500 the second login — take email
-  from `/userinfo` and handle collisions when that path exists.
 - Refresh-token rotation with server-side storage for session revocation.
 
 ## Sandbox lifecycle as a system
 
 Sandboxes here are DB rows with a fake lifecycle, guarded by conditional
-updates (each write applies only if the targeted state still holds at write
-time) — sufficient for this two-state, idempotent-shaped lifecycle. Optimistic
-locking (a `version` column checked in the write, exposed as HTTP `ETag` /
-`If-Match`) should be reintroduced when transitions become non-idempotent or
-carry side effects (a real orchestrator): it turns a stale decision into an
-explicit 409-and-retry instead of a silent convergence.
+updates — sufficient for this two-state lifecycle. Once transitions become
+non-idempotent or carry side effects (a real orchestrator), reintroduce
+optimistic locking (a `version` column / HTTP `ETag` / `If-Match`): it turns
+a stale decision into an explicit 409-and-retry instead of silent
+convergence. Beyond that:
 
 - an event/outbox pattern (`sandbox.created/started/stopped`) publishing to a
   stream for consumers (webhooks, billing, metrics),

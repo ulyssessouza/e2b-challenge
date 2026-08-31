@@ -1,334 +1,221 @@
 # Design & Implementation Decisions
 
-This document explains what was built and why every decision was made the way
-it was — each with the alternatives considered and the tradeoff accepted.
-Companion doc: [IMPROVEMENTS.md](IMPROVEMENTS.md) covers what was deliberately
+What was built and why — every decision with the alternative it beat.
+Companion: [IMPROVEMENTS.md](IMPROVEMENTS.md) covers what was deliberately
 *not* built and how it would be.
-
----
 
 ## 1. System overview
 
-A multi-tenant control-plane API for sandboxes:
+A multi-tenant control-plane API for sandboxes: users sign in via Ory Hydra
+(OAuth2 authorization-code flow) and call the API with the JWT; projects are
+the tenancy unit; sandboxes are DB rows with a fake lifecycle (`running` ⇄
+`stopped`, modeled by `stopped_at`) guarded by conditional updates. Every
+write is rate-limited per user and quota-capped by the user's plan (owned
+projects, running sandboxes).
 
-- **Users** sign in through Ory Hydra (OAuth2 authorization-code flow) and call
-  the API with the resulting JWT access token.
-- **Projects** are the tenancy unit. Members can create sandboxes inside them.
-- **Sandboxes** are DB records with a fake lifecycle (`running` ⇄ `stopped`,
-  modeled by `stopped_at`), guarded by conditional updates.
-- Every write is rate-limited (per user) and quota-capped by the user's plan (owned projects, running sandboxes).
-
-Non-goals (documented, not accidental): real sandbox orchestration, keyset
-pagination, refresh-token sessions. See IMPROVEMENTS.md.
-
----
+Non-goals (deliberate): real orchestration, keyset pagination, refresh-token
+sessions — IMPROVEMENTS.md.
 
 ## 2. Architecture & layering
 
 ```
-cmd/main → server (Echo wiring)
-              ├── middleware  (JWT auth, membership, rate limit, logging)
-              ├── handler     (bind/validate → DTO, status mapping)
-              └── service     (business rules, transactions, error semantics)
-                     └── db   (sqlc-generated, SQL as source of truth)
+main → server (Echo wiring)
+         ├── middleware  (JWT auth, membership, rate limit, logging)
+         ├── handler     (bind/validate → DTO, status mapping)
+         └── service     (business rules, transactions, error semantics)
+                └── db   (sqlc-generated; SQL is the source of truth)
 ```
 
-**Decision: three layers with a strict dependency direction (handler → service
-→ sqlc), no SQL outside `internal/db/queries`.**
+**Three layers, strict dependency direction, no SQL outside
+`internal/db/queries`.** Rejected: *fat handlers on sqlc* — membership,
+quota and lifecycle rules would leak into every endpoint and be untestable
+without a DB; *repository interfaces per service* — the generated `*Queries`
+already is the narrow surface, a 1:1 wrapper adds nothing; *microservices* —
+network failure modes with no scaling need at this size, and the layering
+keeps extraction possible. Framework: **Echo v4** (the fixture's choice; gin
+is equivalent, chi/net-http lack the built-in middleware).
 
-| Alternative | Why rejected |
-|---|---|
-| Fat handlers calling sqlc directly | Fastest to write, but business rules (membership, quotas, versioning) leak into every endpoint; untestable without a DB; duplicable per endpoint. |
-| Repository interfaces per service + mocks | With sqlc, the generated `*Queries` already *is* the narrow surface; wrapping every query in an interface adds a layer that mirrors 1:1 with no behavior change. Interfaces are introduced only at real seams (middleware, see below). |
-| Microservices per domain | The spec is a single service; splitting adds network failure modes with no scaling need at this size. The layering keeps future extraction possible (services only depend on `db.Queries` + plain types). |
-
-**Decision: dependency injection at middleware boundaries via small interfaces**
-(`UserResolver`, `MembershipChecker` in `internal/middleware`). Middleware
-cannot import concrete service logic; the concrete `*db.Queries` satisfies the
-interfaces at wiring time in `server.New`. This made JWT/membership unit-testable
-with trivial stubs — the tests in `auth_test.go`/`membership_test.go` run
-without Postgres.
-
-**Tradeoff accepted:** interfaces without a second implementation are a mild
-YAGNI violation; justified because middleware sits at the security boundary
-and is the code where behavioral testing matters most.
-
-**Decision: Echo v4** — already the project framework; chosen over gin (similar)
-and chi/net-http (less built-in: RequestID/Recover/BodyLimit middleware). No
-strong opinion either way; the cost of the framework is low either way.
-
----
+**DI at the security seam only**: middleware depends on small interfaces
+(`UserResolver`, `MembershipChecker`) that `*db.Queries` satisfies at wiring
+time — the JWT and membership unit tests run without Postgres. Interfaces
+without a second implementation are mild YAGNI; justified because middleware
+is where behavioral testing matters most.
 
 ## 3. Data model
 
-Schema (migrations 000001–000006): `users`, `plans`, `projects`,
-`project_users`, `sandboxes` (indexes: `idx_project_users_user_id`,
+Migrations 000001–000006: `users`, `plans`, `projects`, `project_users`,
+`sandboxes`; indexes `idx_project_users_user_id`,
 `idx_sandboxes_project_created_at`, `idx_sandboxes_user_id`,
-`idx_sandboxes_user_running`, `idx_sandboxes_project_name` — the
-case-insensitive unique sandbox-name index). All access through sqlc.
+`idx_sandboxes_user_running` (partial), `idx_sandboxes_project_name`
+(case-insensitive unique). All access through sqlc.
 
-### 3.1 sqlc over ORMs / raw SQL
+**sqlc over ORMs/raw SQL.** Hand-written SQL, type-checked at generation,
+query cost visible in review; cost: a `generate` step and no dynamic query
+composition. GORM/ent hide the SQL that runs and drift from migrations; raw
+`database/sql` moves renamed-column bugs from build time to runtime.
 
-| Option | Tradeoff |
-|---|---|
-| **sqlc (chosen)** | Queries are hand-written SQL, type-checked at generation time; no runtime reflection, no N+1 surprises, query cost visible in review. Cost: a `sqlc generate` step; no dynamic query composition. |
-| GORM/ent | Runtime query building hides the SQL that runs; migrations drift from models; harder to reason about per-query cost at scale. |
-| Raw `database/sql` | No compile-time check of column/param ordering — a renamed column breaks at runtime, not at build. |
+### 3.1 Identity: the OAuth subject, stored as the user's email
 
-### 3.2 Identity: the OAuth subject, stored as the user's email
+Login upserts the user keyed by the JWT's `sub` claim, stored in
+`users.email` (`name` defaults to the subject too); every request resolves
+via `GetUserByEmail(sub)`. Deliberately simple, and correct because the
+fixture's Hydra sets `sub` = the email typed at the demo login page. The
+upsert is atomic (`ON CONFLICT`), so concurrent callbacks cannot race. The
+general-IdP case — opaque immutable subjects, email from `/userinfo`, a
+dedicated `oauth_sub` column — is the first Identity item in
+IMPROVEMENTS.md (an earlier implementation carried the column; removed as
+machinery the fixture doesn't need).
 
-**Decision:** login upserts the user keyed by the JWT's `sub` claim, stored
-in `users.email`; every request resolves users via `GetUserByEmail(sub)`.
-`name` defaults to the subject too.
+### 3.2 `project_users`: composite PK + owner-only member addition
 
-This is deliberately simple and works because the compose fixture's Hydra
-sets `sub` = the email typed at the demo login page. The general-IdP case —
-opaque, immutable subjects, emails fetched from `/userinfo`, a dedicated
-`oauth_sub` column — is the first entry under Identity in IMPROVEMENTS.md;
-the upsert keeps signup atomic (no check-then-insert race between
-concurrent callbacks) whichever key is used.
+`(project_id, user_id)` PK makes "one membership per pair" a database fact;
+`role CHECK IN ('owner','member')` keeps roles closed-set; reverse index
+`idx_project_users_user_id (user_id, project_id)` serves user→projects
+queries. **Roles are data and only owners add members** (the design spec's
+`JWT + Owner` contract) — otherwise `role` is dead schema and "add your
+friends" is a privilege-escalation foot-gun.
 
-| Alternative | Why rejected for this scope |
-|---|---|
-| Dedicated `oauth_sub` column (implemented earlier, then removed) | Correct for any IdP, but an extra column, backfill, and resolution story for a fixture where `sub` *is* the email; kept as the documented upgrade path. |
-| Fetch email from `/userinfo` | Requires trusting another Hydra endpoint and mapping subjects; same fixture reality — `sub` already *is* the email. |
+### 3.3 Sandbox state: `stopped_at`, no status column
 
-### 3.3 `project_users` join table with composite PK
-
-`(project_id, user_id)` PK enforces "one membership per pair" at the DB level;
-`role CHECK (role IN ('owner','member'))` keeps roles closed-set. The reverse
-index `idx_project_users_user_id (user_id, project_id)` (migration 000004)
-serves user→projects queries; the PK serves project→member checks.
-
-**Decision: roles are data (`owner`, `member`) with owner-only member
-addition** — the design spec's `JWT + Owner` contract. Any member could add
-members (friendlier for collaboration), but then `role` is dead schema and
-"snap your own friends in" becomes a privilege-escalation foot-gun.
-
-### 3.4 Sandbox state: `stopped_at TIMESTAMPTZ`, no status column
-
-**Decision: state is the *presence* of `stopped_at`, not a status string.**
-
-An earlier migration dropped a `status` column in favor of the timestamp.
-Two columns encoding one fact invite drift (`status='stopped'`,
-`stopped_at=NULL`); the timestamp also records *when* it stopped for free.
-`stopped_at IS NULL` doubles as the "running" predicate for the quota count,
-and partial index opportunities follow from the same predicate.
+State is the *presence* of `stopped_at`, not a status string — two columns
+encoding one fact invite drift, and the timestamp records *when* for free;
+`stopped_at IS NULL` doubles as the quota's "running" predicate and
+motivates the partial index.
 
 **Concurrency: guarded conditional updates, no version column.** Each
 transition re-checks its precondition inside the UPDATE, under the row lock:
-stop is guarded by `stopped_at IS NULL`, restart by `stopped_at IS NOT NULL`
-(which also re-checks membership, so a revocation between read and write
-cannot resurrect the sandbox). For this two-state, idempotent-shaped
-lifecycle that is sufficient — competing writes converge instead of
-doubling. A `version` column / `If-Match` scheme is deliberately omitted;
-when transitions become non-idempotent or side-effectful (a real
-orchestrator), reintroduce it — see IMPROVEMENTS.md.
-`ON DELETE CASCADE` on `sandboxes.project_id`/`project_users` keeps deletes
-one-statement at the DB level instead of app-level loops that can half-fail.
+stop is guarded by `stopped_at IS NULL`, restart by `stopped_at IS NOT
+NULL`. For a two-state, idempotent-shaped lifecycle this is sufficient —
+competing writes converge instead of doubling. A `version` column /
+`If-Match` scheme returns when transitions become non-idempotent or
+side-effectful (a real orchestrator) — IMPROVEMENTS.md. `ON DELETE CASCADE`
+keeps deletes single-statement.
 
-### 3.5 `TEXT` UUID PKs
+### 3.4 `TEXT` UUID PKs
 
-36 bytes vs `uuid`'s 16; at billions of rows that bloats every PK, FK and
-index. Chosen because `database/sql` + `lib/pq` handle `TEXT` without
-type wrangling, and IDs never appear in a hot join-by-range pattern here.
-Documented as a real scale fix in IMPROVEMENTS.md (native `uuid` + `pgx`).
-
----
+36 vs 16 bytes; at billions of rows the bloat hits every PK, FK and index.
+Chosen because `database/sql` + `lib/pq` handle TEXT without type wrangling;
+native `uuid` + `pgx` is the documented scale fix.
 
 ## 4. Authentication
 
 ### 4.1 OAuth2 authorization-code flow, confidential client
 
-`client_secret_basic` against Hydra's token endpoint, per the fixture.
-
-| Alternative | Why rejected |
-|---|---|
-| PKCE | The right default for public clients; here the client is confidential with a secret. Listed in IMPROVEMENTS as defense-in-depth. |
-| Implicit flow | Deprecated; tokens in URL fragments. |
-| Resource-owner password | Requires handling raw credentials; forbidden by the spec's shape. |
-
-**State parameter:** 32 bytes from `crypto/rand`, bound to an `HttpOnly` +
-`Secure` + `SameSite=Lax` cookie, single-use (cleared on callback), compared
-with `subtle.ConstantTimeCompare`.
-
-| Alternative | Why rejected |
-|---|---|
-| Server-side state (Redis/DB) | Revocable and multi-instance-friendly, but adds a store dependency to login and a cleanup path; the cookie survives restarts and needs zero infrastructure. Cookie-bound state is the OWASP-recommended stateless pattern. |
-| JWT-signed state | Equivalent protection; more code for no additional property here. |
-
-`SameSite=Lax` (not `Strict`): the callback is a top-level cross-site
-navigation from Hydra — `Strict` would drop the state cookie and break login.
-`Secure` works on `localhost` because browsers treat it as a trustworthy
-origin. (Note: `curl` does *not* send Secure cookies over plain HTTP — the
-E2E script passes the cookie manually; browsers do not need that.)
-
-The callback also handles Hydra's `error=`/`error_description=` redirects
-(explicit 400 instead of a misleading "missing code") and sets
-`Cache-Control: no-store` on the token response (RFC 6749 §5.1 — shared
-caches must not retain an access token).
+`client_secret_basic` against Hydra's token endpoint, per the fixture (PKCE
+is the public-client upgrade path; implicit is deprecated; password grant
+mishandles raw credentials). **State**: 32 bytes from `crypto/rand`, bound
+to an `HttpOnly`+`Secure`+`SameSite=Lax` cookie, single-use, compared with
+`subtle.ConstantTimeCompare`. Cookie-bound state over server-side storage
+(no store dependency, no cleanup path — the OWASP stateless pattern) and
+over JWT-signed state (same protection, more code). `Lax` because the
+callback is a cross-site top-level navigation (`Strict` drops the cookie);
+`Secure` works on localhost (trustworthy origin) — `curl` needs the cookie
+passed manually, browsers don't. The callback surfaces Hydra's `error=`
+redirects as explicit 400s and sets `Cache-Control: no-store` on the token
+response (RFC 6749 §5.1).
 
 ### 4.2 Token validation (`internal/middleware/auth.go`)
 
-Every request verifies:
+1. **Signature** against Hydra's JWKS (`MicahParks/keyfunc`/`jwkset`)
+2. **RS256 only** — blocks `none`/HS256/alg-confusion classes
+3. **`exp` required** — a token without it would never expire
+4. **Issuer pinned** to `HYDRA_PUBLIC_URL`
+5. **`client_id` == configured client** — Hydra leaves `aud` empty unless
+   audiences are explicitly requested (found by E2E: `aud`-based validation
+   rejected *every* legitimate token), so `client_id` is the reliable
+   per-client claim; blocks cross-client replay
+6. **Subject → user** via `GetUserByEmail`; unknown subject → 401, fail
+   closed
 
-1. **Signature** against Hydra's JWKS (`MicahParks/keyfunc` + `jwkset`),
-2. **Algorithm**: `WithValidMethods([]string{"RS256"})` — pins the compose
-   fixture's documented strategy; blocks `none`/HS256/alg-confusion classes,
-3. **Expiration required**: `WithExpirationRequired()` — a token without `exp`
-   would otherwise never expire,
-4. **Issuer pinned** to `HYDRA_PUBLIC_URL` (compose documents `iss` =
-   `http://localhost:4444`),
-5. **`client_id` claim == configured OAuth client** — Hydra leaves `aud` empty
-   unless audiences are explicitly requested (found by E2E testing: `aud`-based
-   validation rejected *every* legitimate token), so `client_id` is its
-   reliable per-client identity claim. This keeps tokens minted for another
-   first-party app of the same issuer from being replayed here.
-6. **Subject resolution**: `sub` (the fixture's email) → internal user via
-   `GetUserByEmail`; unknown subject → 401 (fail closed).
+Rejected: per-request introspection (doubles latency, couples availability
+to Hydra, the scale bottleneck); `aud` validation (correct in theory,
+empirically wrong for Hydra — E2E-proven); HS256 (symmetric: any verifier
+could also mint tokens).
 
-| Alternative | Why rejected |
-|---|---|
-| Token introspection (Hydra `/admin/oauth2/introspect`) per request | Central revocation + no key management, but doubles request latency, couples availability to Hydra, and is the documented bottleneck at scale. |
-| `aud` validation | Correct in theory; empirically wrong for Hydra unless clients request audiences (E2E-proven). `client_id` gives the equivalent guarantee here. |
-| HS256 shared secret | Single-tenant symmetric key: any verifier can also mint tokens; asymmetric RS256 keeps signing private to Hydra. |
+**JWKS lifecycle**: 5-minute refresh; on refresh failure cached keys keep
+serving and the failure is logged. Boot retries 5× (~10 s) so a slow Hydra
+doesn't leave auth hard-down; after that, authed routes fail **closed**
+(503).
 
-**JWKS lifecycle** (`internal/jwks/provider.go`): HTTP storage with 5-minute
-refresh; on refresh failure the previously cached keys keep serving (rotation
-lags, availability doesn't). At boot the fetch is retried 5× with linear
-backoff (~10 s total) — compose starts Hydra in parallel, and a startup race would
-otherwise leave auth hard-down (every authed route 503s) until restart. If it
-still fails, the service starts and authenticated routes fail **closed**
-(503) rather than failing open.
+### 4.3 `ParseUnverified` in the callback — accepted with guards
 
-### 4.3 Callback's `ParseUnverified` — accepted with guards
+The callback token came from Hydra's token endpoint via a
+client-authenticated server-to-server POST — re-verifying it would check
+what Hydra just signed with keys from the same issuer. `ParseUnverified` +
+explicit `iss`/`exp`/`client_id` checks catch a misconfigured provider
+before user creation, at zero extra round-trips.
 
-The callback token arrives from Hydra's token endpoint via a
-client-authenticated server-to-server POST; verifying its signature again
-would verify what Hydra just signed with the same keys we'd fetch from the
-same issuer. `ParseUnverified` + explicit `iss`, `exp` and presence checks
-catch a misconfigured provider before a user row is created, at zero extra
-round-trips. Full verification would add a JWKS fetch on the login path for
-no additional property in this topology.
+## 5. Subject → user resolution
 
----
-
-## 5. Subject → user resolution at request time
-
-**Decision:** JWT middleware resolves `sub` → internal user on every request,
-through a **60-second TTL, 10,000-entry in-process cache with eviction**
-(`CachedUserResolver`). Eviction: expired entries first, then the
-earliest-expiring entry (approximate LRU without access tracking); at
-capacity the cache keeps working instead of silently disabling itself (the
-first implementation froze at capacity — caught in review).
-
-| Alternative | Why rejected / deferred |
-|---|---|
-| No cache | One DB round-trip per authenticated request purely for identity; doubles DB load for hot users. |
-| Redis-backed cache | Shared across instances, but adds a network hop to the hot path and Redis becomes identity-critical. |
-| Embedding user id in the token | Not ours to mint — tokens come from Hydra. |
-| `singleflight` stampede control | Worthwhile at high fan-out; deferred (IMPROVEMENTS.md). |
-
-**Staleness contract:** a deleted/revoked user keeps access ≤ 60 s — bounded,
-and dwarfed by the token's own lifetime. Any future revocation feature must
-invalidate this cache; that coupling is documented here on purpose.
-
----
+`sub` → user on every request through a **60 s TTL, 10k-entry in-process
+cache**; eviction drops expired entries, then the earliest-expiring
+(approximate LRU) — the cache never silently disables itself at capacity
+(the first implementation froze; caught in review). Staleness: a deleted
+user keeps access ≤ 60 s, dwarfed by the token lifetime; any future
+revocation feature must invalidate this cache. Rejected: no cache (identity
+round-trip on every request), Redis (a hop plus an identity-critical store),
+embedding the id in the token (Hydra mints them), singleflight (deferred).
 
 ## 6. Authorization
 
-**Decision: membership is enforced twice** — by the `ProjectMembership`
-middleware (single `LEFT JOIN` query returning a nullable role; no row → 404,
-row with NULL role → 403) and *inside the SQL* for cross-cutting routes:
+**Membership is enforced twice**: `ProjectMembership` middleware — one
+`LEFT JOIN`, no row → 404, NULL role → 403 — and *inside the SQL* for every
+sandbox query (`StopSandbox`, `RestartSandbox`, `GetSandboxByIDAndUser` all
+join `project_users`), which is the only authorization for
+`DELETE /v1/sandboxes/:id` (no project id in the path). Middleware gives
+readable semantics; SQL gives the guarantee — a revocation between read and
+write cannot resurrect access.
 
-- `StopSandbox` joins `project_users` in the UPDATE,
-- `RestartSandbox` re-checks membership in the UPDATE (a revocation between
-  the read and the write cannot resurrect the sandbox for a former member),
-- `GetSandboxByIDAndUser` joins `project_users` for reads.
-
-`DELETE /v1/sandboxes/:id` has no project id in the path, so middleware alone
-cannot scope it — the SQL join is the authorization there. This is
-defense-in-depth: middleware for readable 404/403 semantics, SQL for the
-guarantee.
-
-**Decision: 404 vs 403 distinction.** Missing project → 404; existing project
-you don't belong to → 403. This is technically an existence oracle for
-authenticated callers; accepted because project IDs are unguessable UUIDs and
-the distinction makes client debugging tractable. (Returning 404 for both is
-the stricter option; chosen debuggability over paranoia here.)
-
-**Decision: single membership query instead of two.** The original code ran
-`GetProjectByID` (result discarded) + `GetProjectMember` — two round-trips per
-project-scoped request. The `LEFT JOIN` returns role nullability, halving the
-per-request DB cost on the hottest guarded path.
-
----
+**404 vs 403**: missing project → 404, non-member → 403. An existence
+oracle for authenticated callers, accepted because IDs are unguessable UUIDs
+and client debugging matters. The original two queries (existence +
+membership) collapsed into the single `LEFT JOIN` — one round-trip on the
+hottest guarded path.
 
 ## 7. Rate limiting & quota
 
 ### 7.1 Fixed-window per-user limiter (Redis)
 
-Key: `ratelimit:user:<id>:<UTC-minute>`; `INCR`, `EXPIRE` on first hit;
-429 with `Retry-After` (from `TTL`) and `X-RateLimit-Limit/Remaining` headers
-so developers can see *why* they're throttled. `/auth/login` and
-`/auth/callback` are throttled per IP (`ratelimit:ip:...`) because they are
-unauthenticated and drive Hydra-side work (state minting, token exchange).
-
-**Deliberately accepted weaknesses (documented in code):**
-
-- **`INCR` + `EXPIRE` are not atomic** — a crash between them leaks one
-  key without TTL (one user+window throttled until flush). A Lua script makes
-  it atomic; rejected here for operational simplicity after weighing the
-  worst case. (This was implemented atomically and simplified on request.)
-- **Fixed windows admit ~2× burst at boundaries.** Sliding-window/GCRA fixes
-  it (IMPROVEMENTS.md); the fixed window is two commands and trivially
-  explainable.
-- **Fail-open vs fail-closed is a config choice** (`RATE_LIMIT_FAIL_OPEN`,
-  default *open*): during a Redis outage, fail-open keeps the demo usable but
-  removes protection exactly when retry storms are likely; fail-closed
-  protects the platform but turns a Redis incident into a full outage. There
-  is no right answer — so it's a flag, not an accident, and `/health`
-  reports Redis degraded so operators know which mode they're in.
-
-Per-user keying (not global): the README's tenancy model is per-developer
-limits; a global limiter would let one noisy tenant starve others.
+`ratelimit:user:<id>:<UTC-minute>`; `INCR` + `EXPIRE` on first hit; 429 with
+`Retry-After` (from TTL) and `X-RateLimit-*` headers. `/auth/*` is
+throttled per IP (unauthenticated, drives Hydra-side work). Accepted
+weaknesses: `INCR`+`EXPIRE` are non-atomic (a crash between them leaks one
+window key — a Lua script would fix it, declined for two plain commands);
+fixed windows admit ~2× burst at boundaries (GCRA / sliding window is the
+upgrade). **Fail-open vs fail-closed is a flag** (`RATE_LIMIT_FAIL_OPEN`,
+default open): a Redis outage either removes protection exactly when retry
+storms are likely, or turns the incident into a full outage — a judgment
+call, not an accident, and `/health` reports Redis degraded either way.
+Per-user keying so one noisy tenant cannot starve others.
 
 ### 7.2 Quotas: the plans table
 
-The domain model's "plan with limits" is materialized as a `plans` table
-(seed data: `hobby` 5 projects / 3 running sandboxes, `pro` 25/20,
-`ultimate` unlimited), attached **per user** (`users.plan_id`, default
-hobby). Limits scope over what a user *has*:
+The "plan with limits" is a `plans` table (seeds: `hobby` 5 projects / 3
+running sandboxes, `pro` 25/20, `ultimate` 0 = unlimited) attached per user
+(`users.plan_id`, default hobby). Limits scope over what the user *has*:
 
-- **owned projects** (`project_users.role = 'owner'`) — membership in others'
-  projects is free;
-- **running sandboxes the user created** (`sandboxes.user_id`,
+- **owned projects** (`role='owner'`) — membership in others' projects is
+  free;
+- **running sandboxes created by the user** (`sandboxes.user_id`,
   `stopped_at IS NULL`), across all projects.
 
-`Create` and `Restart` in the sandbox service, and `Create` in the project
-service, check plan vs usage (check-then-create) and reject with 403 naming
-the plan and the limit. **Restart is quota-checked too**: while a sandbox is
-stopped it does not count toward the quota, so restarting is growth whenever
-new sandboxes were created since the stop — exempting restart would let
-running count exceed the cap without bound. 0 = unlimited. Enforcement is
-soft (check-then-create): concurrent creates can overshoot the cap by a few,
-bounded by the rate limit, and the overshoot persists while those sandboxes
-run — strict enforcement (per-user advisory lock or Redis counters) is the
-documented upgrade path. When a member restarts a sandbox someone else
-created, the check targets the CREATOR's plan — the creator's count grows,
-so checking the actor's instead would let members trade their own unused
-headroom to push a capped creator past their limit. The bounded count
-queries (`LIMIT <plan cap>`) keep the check O(cap), not O(user history).
+**Enforcement** (check-then-create; 403 naming the plan and the limit):
+sandbox `Create` *and* `Restart`, project `Create`. Restart is
+quota-checked because a stopped sandbox does not count — restarting is
+growth whenever new sandboxes were created since the stop; exempting it let
+the running count exceed the cap without bound (found in review). The check
+targets the **creator** (counts are by creator) — checking the actor
+instead would let members trade their own headroom to push a capped creator
+past the limit. Counts are **cap-bounded** (`LIMIT <plan cap>`): O(cap),
+not O(user history); unlimited plans skip the count.
 
-| Alternative | Why rejected / deferred |
-|---|---|
-| Env-var hard cap (the previous implementation) | No domain grounding, no per-tier story, opaque to operators and users. |
-| Atomic check+insert (`INSERT..SELECT..WHERE count<limit`) | Still racy without serialization; gnarly SQL for no real gain. |
-| Redis atomic counters, reconciled to Postgres | Truly atomic but makes Redis a correctness dependency for data integrity; the plans design (IMPROVEMENTS.md) is where strict enforcement belongs. |
-| Plan per project | Limits per project rather than per account; contradicts the "a user has a plan" model. |
-| Plan management API | Auth scope (who is admin?) beyond the README; limits are editable seed rows. |
-
----
+Soft by design: concurrent creates can overshoot by a few (bounded by the
+rate limit; the overshoot persists while those sandboxes run); strict
+enforcement means a per-user advisory lock or Redis counters reconciled to
+Postgres — IMPROVEMENTS.md. Rejected: env-var cap (no domain grounding);
+`INSERT..SELECT..WHERE count<limit` (still racy without serialization);
+plan-per-project (contradicts "a user has a plan"); a management API (admin
+scope beyond the README).
 
 ## 8. HTTP API surface
 
@@ -336,7 +223,7 @@ queries (`LIMIT <plan cap>`) keep the check O(cap), not O(user history).
 
 | Method | Path | Auth | Semantics |
 |---|---|---|---|
-| GET | `/health` | – | Liveness/readiness (see §10.2) |
+| GET | `/health` | – | Liveness/readiness (see §10) |
 | GET | `/auth/login` | IP-limited | Mint state, 302 → Hydra |
 | GET | `/auth/callback` | IP-limited | Code→token, upsert user, return token JSON |
 | GET/POST | `/v1/projects` | JWT + rate limit | List (paginated) / create (+owner membership, in one tx) |
@@ -345,148 +232,100 @@ queries (`LIMIT <plan cap>`) keep the check O(cap), not O(user history).
 | GET/POST | `/v1/projects/:id/sandboxes` | JWT + member + rate limit | List / create (or restart when `sandbox_id` present) |
 | DELETE | `/v1/sandboxes/:id` | JWT (SQL-enforced membership) | Stop a sandbox |
 
-**Routing fallback behavior (deliberate):** authentication middleware wraps
-the router's fallback handlers, so unauthenticated callers get 401 for
-unknown routes and wrong methods (no route enumeration without a token);
-authenticated callers get 404 rather than RFC-405 for unsupported methods —
-Echo stamps the group middleware onto fallbacks, and emitting 405 would
-require moving auth out of the group, which would trade away that
-enumeration protection for cosmetic HTTP semantics.
-
-`POST /sandboxes` doubling as restart via optional `sandbox_id` mirrors E2B's
-real-world "create if absent, restart if present" ergonomics; `created`
-distinguishes 201 (new resource) from 200 (state transition) honestly.
+**Routing fallbacks (deliberate)**: auth middleware wraps the router's
+fallback handlers, so unauthenticated callers get 401 for unknown routes
+and wrong methods (no route enumeration); authenticated callers get 404
+rather than RFC-405 — emitting 405 would require moving auth out of the
+group, trading enumeration protection for cosmetic HTTP semantics.
+`POST /sandboxes` doubling as restart via optional `sandbox_id` mirrors
+E2B's create-or-restart ergonomics; `created` distinguishes 201 from 200
+honestly.
 
 ### 8.2 Response contract
 
 - **Explicit DTOs** (`internal/handler/dto.go`): snake_case fields,
-  `stopped_at` as `*time.Time` (JSON `null` while running). The DB models have
-  no JSON tags on purpose — the API shape must not be coupled to the schema,
-  and `sql.NullTime` would otherwise serialize as `{"Time":...,"Valid":false}`.
-
-  | Alternative | Why rejected |
-  |---|---|
-  | `sqlc emit_json_tags` | Couples the wire format to column names and still leaks `Null*` structs. |
-  | Return models directly | PascalCase keys + internal type leakage — the exact bug the DTO layer exists to prevent. |
-
-- **Empty lists serialize as `[]`, never `null`** (normalized in the service
-  layer) — clients can iterate without null checks.
-- **Pagination:** `?limit` (default 50, cap 200), `?offset`; response carries
-  `{data, limit, offset, total, total_pages}`. Invalid/negative params fall
-  back to defaults silently; offsets are clamped to `math.MaxInt32` (a raw
-  `int32` cast overflowed into negative offsets → Postgres 500). Offset
-  pagination is the *accepted* scale limitation (O(n) pages, per-request
-  `COUNT(*)`, unstable under concurrent inserts) — the keyset design that
-  replaces it is written up in IMPROVEMENTS.md.
-- **Validation:** 1 MiB body limit globally (`BodyLimit("1M")`), names/emails
-  capped at 255 chars. Sandbox names are mandatory (trimmed;
-  whitespace-only rejected) and **unique per project, case-insensitively**
-  (`UNIQUE (project_id, LOWER(name))`) — Postgres `23505` is translated to
-  `ErrConflict` → 409, so the race-free guarantee lives in the schema, not
-  in a check-then-lookup. Unbounded `TEXT` columns + unbounded bodies are an
-  OOM lever; capping at the edge keeps the rule in one place.
+  `stopped_at` as `*time.Time` (null while running). Models carry no JSON
+  tags on purpose — the wire format must not couple to the schema
+  (`sqlc emit_json_tags` couples it and still leaks `Null*` structs;
+  returning models directly leaked PascalCase and internals — the bug this
+  layer prevents).
+- **Empty lists are `[]`, never `null`** (normalized in services).
+- **Pagination**: `?limit` (default 50, cap 200), `?offset` → `{data,
+  limit, offset, total, total_pages}`; invalid/negative params fall back to
+  defaults; offset clamped to `math.MaxInt32` (a raw `int32` cast overflowed
+  negative → Postgres 500). Offset pagination is the accepted scale
+  limitation (O(n) deep pages, unstable under churn) — the keyset design is
+  in IMPROVEMENTS.md.
+- **Validation**: 1 MiB body limit; names/emails ≤ 255. Sandbox names are
+  mandatory (trimmed; whitespace-only rejected) and **unique per project,
+  case-insensitively** (`UNIQUE (project_id, LOWER(name))`) — Postgres
+  `23505` → `ErrConflict` → 409, so the guarantee lives in the schema, not
+  a check-then-lookup.
 
 ### 8.3 Status codes
 
-`201` created / `200` read or state-transition / `204` stop / `400` malformed
-input / `401` auth / `403` non-member, non-owner, quota / `404` missing
-(including cross-tenant lookups — no existence leak) / `409` duplicate member,
-re-stop, guarded-write conflict / `429` rate limit / `503` auth or limiter unavailable.
-
----
+`201` created / `200` read or state-transition / `204` stop / `400`
+malformed input / `401` auth / `403` non-member, non-owner, quota / `404`
+missing (cross-tenant lookups included — no existence leak) / `409`
+duplicate member, re-stop, duplicate sandbox name / `429` rate limit / `503`
+auth or limiter unavailable.
 
 ## 9. Error handling
 
-**Decision: sentinel errors in the service layer** (`ErrNotFound`,
-`ErrConflict`, `ErrQuotaExceeded`), mapped to status codes by handlers via
-`errors.Is`; unique-violation (`23505`) and FK-violation (`23503`) are
-translated to `ErrConflict`/`ErrNotFound` inside services so SQL details
-never shape HTTP semantics.
+**Sentinel errors** (`ErrNotFound`, `ErrConflict`, `ErrQuotaExceeded`)
+mapped by handlers via `errors.Is`; SQLSTATEs are translated inside
+services with named constants (`errCodeUniqueViolation` = 23505 →
+`ErrConflict`, `errCodeForeignKeyViolation` = 23503 → `ErrNotFound`) so SQL
+details never shape HTTP semantics. Rejected: `strings.Contains` on message
+text (any DB error mentioning "not found" became a 404; duplicate members
+500'd); per-endpoint error taxonomy (ceremony beyond the three sentinels).
 
-| Alternative | Why rejected |
-|---|---|
-| `strings.Contains(err.Error(), "not found")` | The original approach: any DB error mentioning "not found" became a 404; duplicate members 500'd; semantics lived in message text. Fragile by construction. |
-| Per-endpoint error types | More precise, but a struct taxonomy per service is ceremony without callers that need to distinguish beyond the three sentinels. |
-
-**5xx responses never echo internals.** `HTTPErrorHandler` replaces any
-≥500 body with `{"code":"INTERNAL_ERROR","message":"internal error"}` and
-logs the full error with `request_id`, method, path via `slog`. 4xx messages
-pass through — they're client-facing by design. The failure mode this
-prevents: `err.Error()` from pq leaks SQL, constraints and hostnames.
-
-**Multi-statement operations are transactional** (project+owner insert;
-member lookup+insert) so partial failure can't leave an ownerless project or
-surface a raw FK error as 500. `defer tx.Rollback()` + explicit `Commit` is
-the standard Go pattern; the deferred rollback is a no-op after commit.
-
----
+**5xx never echo internals**: bodies become
+`{"code":"INTERNAL_ERROR","message":"internal error"}`; the full error is
+logged with request id, method and path. 4xx messages pass through — they
+are client-facing by design. Multi-statement operations are transactional
+(project+owner; member lookup+insert) — no ownerless projects, no raw FK
+500s.
 
 ## 10. Operations
 
-### 10.1 Process lifecycle
-
-- **Migrations embedded** (`go:embed` + `migrate/source/iofs`): the binary is
-  self-contained and CWD-independent. Alternative — `file://` paths — breaks
-  when the binary isn't launched from the repo root. Known gap: golang-migrate
-  takes no advisory lock, so two instances booting together can race
-  (documented; deployment jobs should run migrations).
-- **HTTP server timeouts** (`ReadHeaderTimeout` 5 s, read 15 s, write 30 s,
-  idle 120 s): a default `http.Server` has *zero* timeouts — slowloris
-  clients pin connections forever. `WriteTimeout` bounds any handler,
-  including slow DB queries.
-- **Graceful shutdown**: SIGINT/SIGTERM → `Shutdown` with a 10 s drain →
-  cancel contexts → close DB/Redis. In-flight requests drain instead of
-  dying mid-write.
-- **DB pool bounds**: `DB_MAX_OPEN_CONNS=25`, `DB_MAX_IDLE_CONNS=25`,
-  `DB_CONN_MAX_LIFETIME_SECS=1800`. Without bounds, each instance opens
-  unbounded Postgres connections under load — the first failure at scale.
-  Idle conn rotation avoids stale-connect errors after failovers.
-
-### 10.2 Health
-
-`/health` returns per-dependency status: `database` (down → 503),
-`redis` (degraded → still 200, matching the limiter's fail-open default),
-`auth` (JWKS loaded; down → 503). Bodies carry *statuses only* — dial errors
-(hostnames, ports) go to logs, not to anonymous callers. The auth check
-exists because JWKS-load failure silently 503s *every* authed route; without
-it the health check would lie.
-
-### 10.3 Observability
-
-Structured `slog` request logs (request id, method, path, status, duration;
-`/health` skipped) + error logs with request ids. OpenTelemetry was removed
-from this submission deliberately; the replacement plan (RED metrics, traces,
-rate-limit rejection counters) is in IMPROVEMENTS.md rather than half-wired
-here.
-
----
+- **Migrations embedded** (`go:embed` + `migrate/source/iofs`):
+  CWD-independent binary. Gap: golang-migrate takes no advisory lock — two
+  instances can race at boot (run migrations as a deploy job).
+- **HTTP timeouts** (header 5 s / read 15 s / write 30 s / idle 120 s): a
+  default `http.Server` has none — slowloris clients pin connections
+  forever.
+- **Graceful shutdown**: SIGINT/SIGTERM → 10 s drain → cancel → close
+  DB/Redis.
+- **Pool bounds** (`DB_MAX_OPEN_CONNS=25`, idle 25, lifetime 1800 s):
+  unbounded pools are the first failure at scale.
+- **Health**: per-dependency statuses only — `database` (down → 503),
+  `redis` (degraded → 200, matching fail-open), `auth` (JWKS loaded; down →
+  503). Dial errors go to logs, not anonymous callers; the auth check exists
+  because a stuck JWKS silently 503s every authed route.
+- **Observability**: slog request logs (request id/method/path/status/
+  duration; `/health` skipped) + error logs. OpenTelemetry removed
+  deliberately; the RED-metrics/traces/counter plan is in IMPROVEMENTS.md.
 
 ## 11. Testing
 
-- **Middleware unit tests** (no DB): JWT alg/issuer/expiration/client_id
-  rejection paths with generated RSA keys; membership 401/403/404 branches;
+- **Middleware unit tests, DB-free**: JWT rejection paths (alg/issuer/exp/
+  client_id) with generated RSA keys; membership 401/403/404 branches;
   user-cache TTL/eviction/capacity; rate limiter 429 + `Retry-After` +
   fail-closed (skip-guarded on live Redis).
 - **Handler tests**: OAuth state cookie lifecycle, `error=` surfacing.
-- **Integration placeholders**: service/handler suites are `t.Skip` stubs
-  meant for the compose stack; live-service tests skip (not fail) when
-  dependencies are absent so `go test ./...` works anywhere.
-- **End-to-end**: the full browser flow (emulated over HTTP with Hydra's
-  admin accept endpoints) plus the complete authz/lifecycle/limits matrix,
-  exercised against the live stack via the shipped scripts
-  (`scripts/e2e.sh` — 36 checks; `scripts/quota_e2e.sh` — 18 plan-limit
-  checks; both use throwaway per-run users and are safe to re-run without
-  resetting the database). This is what caught the two
-  bugs static review missed (empty-`Addr` random port binding; `aud`
-  validation incompatible with Hydra's empty-audience tokens) and the
-  restart-quota bypass found in final review.
+- **Integration placeholders**: `t.Skip` stubs for the compose stack; live
+  tests skip when dependencies are absent so `go test ./...` works anywhere.
+- **E2E, shipped**: `scripts/e2e.sh` (43 checks — OAuth flow, authz matrix,
+  lifecycle, sandbox-name rules) and `scripts/quota_e2e.sh` (18 checks —
+  plan limits, slot freeing, restart-at-cap); throwaway per-run users,
+  safe to re-run without resetting the database. This is what caught the
+  bugs static review missed: the random-port binding, the `aud`-vs-Hydra
+  incompatibility, and the restart quota bypass.
 
-| Alternative | Why rejected / deferred |
-|---|---|
-| testcontainers for integration tests | Real DB coverage in CI without compose; worthwhile, deferred to keep the submission dependency-light. |
-| Mock-heavy service tests | The interesting behavior (guarded transitions, membership joins, quotas) lives in SQL — mocks would test the mock. The E2E script covers those paths for real. |
-
----
+Rejected: testcontainers (worthwhile; deferred to stay dependency-light);
+mock-heavy service tests (the behavior lives in SQL — mocks would test the
+mock).
 
 ## 12. Summary of consciously accepted trade-offs
 
@@ -502,3 +341,4 @@ here.
 | Quota count-then-insert | Simple, no locks | Contention overshoot (bounded by rate limit; persists while the sandboxes run) | Per-user advisory lock / Redis counters |
 | No `Cookie` `__Host-` prefix / PKCE | Fixture compatibility | Marginal hardening left on table | IMPROVEMENTS.md |
 | Demo secrets in config defaults | Runnable out of the box | Not production secrets hygiene | Env injection / vault |
+| Email-keyed identity | Fixture simplicity (`sub` = email) | Breaks with opaque IdP subjects | `oauth_sub` column + `/userinfo` |
