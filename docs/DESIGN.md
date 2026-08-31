@@ -227,6 +227,7 @@ scope beyond the README).
 | Method | Path | Auth | Semantics |
 |---|---|---|---|
 | GET | `/health` | – | Liveness/readiness (see §10) |
+| GET | `/openapi.json`, `/swagger-ui.html` | – | Public API docs: hand-written OpenAPI 3 spec + Swagger UI (CDN-hosted UI); `/` redirects to the UI |
 | GET | `/auth/login` | IP-limited | Mint state, 302 → Hydra |
 | GET | `/auth/callback` | IP-limited | Code→token, upsert user, return token JSON |
 | GET/POST | `/v1/projects` | JWT + rate limit | List (paginated) / create (+owner membership, in one tx) |

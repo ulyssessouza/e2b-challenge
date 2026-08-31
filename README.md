@@ -36,7 +36,8 @@ go run .                      # starts on :8080, runs migrations, logs in via de
 ```
 
 Log in at `http://localhost:8080/auth/login` (demo user `foo@bar.com` /
-`foobar`), then call the API with the returned access token.
+`foobar`), then call the API with the returned access token. Interactive API
+docs: [`/swagger-ui.html`](http://localhost:8080/swagger-ui.html) (public).
 
 End-to-end suites (require the running server; safe to re-run — each run
 uses throwaway users):
@@ -93,6 +94,8 @@ curl -s -X DELETE http://localhost:8080/v1/sandboxes/$SANDBOX_ID \
   -H "Authorization: Bearer $TOKEN"
 # {"code":"CONFLICT","message":"conflict: sandbox already stopped"}
 ```
+
+Please check DESIGN.md or the [Swagger UI](http://localhost:8080/swagger-ui.html) for the API endpoints
 
 ## What to Build
 

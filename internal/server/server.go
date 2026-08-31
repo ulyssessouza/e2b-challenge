@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"net/http"
 	"time"
 
 	"github.com/MicahParks/keyfunc/v3"
@@ -41,6 +42,12 @@ func New(cfg *config.Config, sqlDB *sql.DB, rdb *redis.Client, kf keyfunc.Keyfun
 	healthH := handler.NewHealthCheck(sqlDB, rdb, kf != nil)
 
 	e.GET("/health", healthH.Check)
+	// Public API documentation (describe the contract, grant no access).
+	e.GET("/openapi.json", handler.OpenAPI)
+	e.GET("/swagger-ui.html", handler.SwaggerUI)
+	e.GET("/", func(c echo.Context) error {
+		return c.Redirect(http.StatusFound, "/swagger-ui.html")
+	})
 	e.GET("/auth/login", authH.Login, mid.IPRateLimiter(rdb, cfg.AuthRateLimitPerMin, cfg.RateLimitFailOpen))
 	e.GET("/auth/callback", authH.Callback, mid.IPRateLimiter(rdb, cfg.AuthRateLimitPerMin, cfg.RateLimitFailOpen))
 
