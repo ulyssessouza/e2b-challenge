@@ -35,7 +35,7 @@ func NewCachedUserResolver(next UserResolver, ttl time.Duration, maxEntries int)
 	}
 }
 
-func (c *CachedUserResolver) GetUserByOAuthSub(ctx context.Context, sub string) (db.User, error) {
+func (c *CachedUserResolver) GetUserByEmail(ctx context.Context, sub string) (db.User, error) {
 	c.mu.Lock()
 	if e, ok := c.entries[sub]; ok && time.Now().Before(e.expires) {
 		user := e.user
@@ -44,7 +44,7 @@ func (c *CachedUserResolver) GetUserByOAuthSub(ctx context.Context, sub string) 
 	}
 	c.mu.Unlock()
 
-	user, err := c.next.GetUserByOAuthSub(ctx, sub)
+	user, err := c.next.GetUserByEmail(ctx, sub)
 	if err != nil {
 		return user, err
 	}

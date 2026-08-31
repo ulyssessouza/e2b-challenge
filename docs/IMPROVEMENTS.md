@@ -63,9 +63,12 @@ a sliding-window Lua script smooths this without extra round-trips.
 
 ## Identity
 
-- `oauth_sub` is now the identity key, but emails are still seeded from the
-  subject (Hydra's demo sets `sub` = email). In production, take `email` from
-  the ID token / `/userinfo` and never guess it.
+- Identity is keyed by `users.email`, which is seeded from the JWT subject —
+  correct here because the fixture's Hydra sets `sub` = the typed email. A
+  real IdP issues opaque, immutable subjects that outlive email changes, so
+  production adds a dedicated `oauth_sub` column (unique, backfilled),
+  resolves JWTs by it, and takes `email` from the ID token / `/userinfo`
+  instead of guessing it.
 - Add PKCE to the authorization-code flow (cheap, protects public clients).
 - The login upsert does a no-op `DO UPDATE` per returning login (to get the
   row back from `RETURNING`); `DO NOTHING` + re-select avoids the dead-tuple

@@ -82,13 +82,14 @@ func (s *AuthService) ExchangeCode(ctx context.Context, code string) (string, er
 	return tr.AccessToken, nil
 }
 
+// FindOrCreateUser keys identity on the OAuth subject. The compose fixture
+// guarantees sub == the typed email (see docs/DESIGN.md 3.2), so the subject
+// is stored as the user's email; a real IdP would need a dedicated
+// oauth_sub column (docs/IMPROVEMENTS.md).
 func (s *AuthService) FindOrCreateUser(ctx context.Context, sub string) (*db.User, error) {
-	// The OAuth subject is the identity; email/name default to the subject
-	// for this fixture (Hydra's demo login uses the email as the subject).
-	user, err := s.q.UpsertUserByOAuthSub(ctx, db.UpsertUserByOAuthSubParams{
-		OauthSub: sub,
-		Email:    sub,
-		Name:     sub,
+	user, err := s.q.UpsertUserByEmail(ctx, db.UpsertUserByEmailParams{
+		Email: sub,
+		Name:  sub,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("upserting user: %w", err)

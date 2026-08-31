@@ -10,7 +10,7 @@ import (
 )
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, created_at, oauth_sub, plan_id FROM users WHERE email = $1 LIMIT 1
+SELECT id, email, name, created_at, plan_id FROM users WHERE email = $1 LIMIT 1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -21,51 +21,33 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Email,
 		&i.Name,
 		&i.CreatedAt,
-		&i.OauthSub,
 		&i.PlanID,
 	)
 	return i, err
 }
 
-const getUserByOAuthSub = `-- name: GetUserByOAuthSub :one
-SELECT id, email, name, created_at, oauth_sub, plan_id FROM users WHERE oauth_sub = $1 LIMIT 1
+const upsertUserByEmail = `-- name: UpsertUserByEmail :one
+INSERT INTO users (email, name) VALUES ($1, $2)
+ON CONFLICT (email) DO UPDATE SET email = users.email
+RETURNING id, email, name, created_at, plan_id
 `
 
-func (q *Queries) GetUserByOAuthSub(ctx context.Context, oauthSub string) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByOAuthSub, oauthSub)
+type UpsertUserByEmailParams struct {
+	Email string
+	Name  string
+}
+
+// The no-op DO UPDATE guarantees a row is always returned: first login
+// inserts, later logins return the existing row atomically (no
+// check-then-insert race between concurrent callbacks).
+func (q *Queries) UpsertUserByEmail(ctx context.Context, arg UpsertUserByEmailParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, upsertUserByEmail, arg.Email, arg.Name)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
 		&i.Name,
 		&i.CreatedAt,
-		&i.OauthSub,
-		&i.PlanID,
-	)
-	return i, err
-}
-
-const upsertUserByOAuthSub = `-- name: UpsertUserByOAuthSub :one
-INSERT INTO users (oauth_sub, email, name) VALUES ($1, $2, $3)
-ON CONFLICT (oauth_sub) DO UPDATE SET oauth_sub = users.oauth_sub
-RETURNING id, email, name, created_at, oauth_sub, plan_id
-`
-
-type UpsertUserByOAuthSubParams struct {
-	OauthSub string
-	Email    string
-	Name     string
-}
-
-func (q *Queries) UpsertUserByOAuthSub(ctx context.Context, arg UpsertUserByOAuthSubParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, upsertUserByOAuthSub, arg.OauthSub, arg.Email, arg.Name)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Email,
-		&i.Name,
-		&i.CreatedAt,
-		&i.OauthSub,
 		&i.PlanID,
 	)
 	return i, err

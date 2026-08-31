@@ -61,7 +61,7 @@ strong opinion either way; the cost of the framework is low either way.
 
 ## 3. Data model
 
-Schema (migrations 000001–000007): `users`, `plans`, `projects`,
+Schema (migrations 000001–000006): `users`, `plans`, `projects`,
 `project_users`, `sandboxes` (indexes: `idx_project_users_user_id`,
 `idx_sandboxes_project_created_at`, `idx_sandboxes_user_id`,
 `idx_sandboxes_user_running`). All access through sqlc.
@@ -74,23 +74,23 @@ Schema (migrations 000001–000007): `users`, `plans`, `projects`,
 | GORM/ent | Runtime query building hides the SQL that runs; migrations drift from models; harder to reason about per-query cost at scale. |
 | Raw `database/sql` | No compile-time check of column/param ordering — a renamed column breaks at runtime, not at build. |
 
-### 3.2 Identity: `oauth_sub`, not email (migration 000005)
+### 3.2 Identity: the OAuth subject, stored as the user's email
 
-**Decision:** users carry `oauth_sub TEXT UNIQUE NOT NULL` (the IdP subject);
-JWTs resolve users via `oauth_sub`; `email`/`name` are profile data.
+**Decision:** login upserts the user keyed by the JWT's `sub` claim, stored
+in `users.email`; every request resolves users via `GetUserByEmail(sub)`.
+`name` defaults to the subject too.
 
-The original implementation conflated `sub` with `email`. That works only
-because Hydra's demo login app sets `sub` = the typed email. With any real
-provider, `sub` is opaque and stable — keying identity to email would (a)
-create junk users, (b) break add-member-by-email lookups, (c) orphan a user's
-projects if they change email upstream. The backfill (`oauth_sub = email`)
-kept existing rows valid.
+This is deliberately simple and works because the compose fixture's Hydra
+sets `sub` = the email typed at the demo login page. The general-IdP case —
+opaque, immutable subjects, emails fetched from `/userinfo`, a dedicated
+`oauth_sub` column — is the first entry under Identity in IMPROVEMENTS.md;
+the upsert keeps signup atomic (no check-then-insert race between
+concurrent callbacks) whichever key is used.
 
-| Alternative | Why rejected |
+| Alternative | Why rejected for this scope |
 |---|---|
-| Keep email as identity | Identity keyed to a mutable, provider-churn-prone attribute. |
-| Key by email *and* store sub but resolve by email | Same fragility, more columns. |
-| Fetch email from `/userinfo` | Right move in production (noted in IMPROVEMENTS); unnecessary for the fixture where `sub` *is* the email — the column stays honest either way. |
+| Dedicated `oauth_sub` column (implemented earlier, then removed) | Correct for any IdP, but an extra column, backfill, and resolution story for a fixture where `sub` *is* the email; kept as the documented upgrade path. |
+| Fetch email from `/userinfo` | Requires trusting another Hydra endpoint and mapping subjects; same fixture reality — `sub` already *is* the email. |
 
 ### 3.3 `project_users` join table with composite PK
 
@@ -183,8 +183,8 @@ Every request verifies:
    validation rejected *every* legitimate token), so `client_id` is its
    reliable per-client identity claim. This keeps tokens minted for another
    first-party app of the same issuer from being replayed here.
-6. **Subject resolution**: `sub` → internal user via `oauth_sub`; unknown
-   subject → 401 (fail closed).
+6. **Subject resolution**: `sub` (the fixture's email) → internal user via
+   `GetUserByEmail`; unknown subject → 401 (fail closed).
 
 | Alternative | Why rejected |
 |---|---|

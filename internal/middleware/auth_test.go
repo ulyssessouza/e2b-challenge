@@ -25,7 +25,7 @@ type stubUserResolver struct {
 	err  error
 }
 
-func (s stubUserResolver) GetUserByOAuthSub(_ context.Context, _ string) (db.User, error) {
+func (s stubUserResolver) GetUserByEmail(_ context.Context, _ string) (db.User, error) {
 	return s.user, s.err
 }
 

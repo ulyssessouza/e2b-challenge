@@ -23,7 +23,7 @@ const (
 )
 
 type UserResolver interface {
-	GetUserByOAuthSub(ctx context.Context, sub string) (db.User, error)
+	GetUserByEmail(ctx context.Context, sub string) (db.User, error)
 }
 
 func JWTAuth(kf keyfunc.Keyfunc, users UserResolver, issuer, clientID string) echo.MiddlewareFunc {
@@ -72,7 +72,9 @@ func JWTAuth(kf keyfunc.Keyfunc, users UserResolver, issuer, clientID string) ec
 				return echo.NewHTTPError(http.StatusUnauthorized, "token missing subject")
 			}
 
-			user, err := users.GetUserByOAuthSub(c.Request().Context(), sub)
+			// The fixture's Hydra sets sub == the typed email, so the
+			// subject resolves users by email (docs/DESIGN.md 3.2).
+			user, err := users.GetUserByEmail(c.Request().Context(), sub)
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return echo.NewHTTPError(http.StatusUnauthorized, "user not found")

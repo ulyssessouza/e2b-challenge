@@ -1,3 +1,0 @@
-DROP INDEX IF EXISTS idx_users_oauth_sub;
-ALTER TABLE users ALTER COLUMN oauth_sub DROP NOT NULL;
-ALTER TABLE users DROP COLUMN IF EXISTS oauth_sub;
