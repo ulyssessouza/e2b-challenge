@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# End-to-end test for the sandbox API (35 checks).
-# Requires: fresh database (docker compose down -v && docker compose up -d --wait,
-# then start the server) and the server on :8080. Not idempotent — run once.
+# End-to-end test for the sandbox API (34 checks).
+# Requires: compose stack up and the server on :8080. Uses throwaway users
+# per run, so it is safe to re-run without resetting the database.
 # Emulates the browser OAuth flow using Hydra's admin API for login/consent accept.
 set -u
 curl -fs http://localhost:8080/health >/dev/null || { echo "server not healthy on :8080"; exit 1; }
+RUN_ID="$(date +%s)-$RANDOM"
+USER_A="e2e-a-$RUN_ID@test.local"
+USER_B="e2e-b-$RUN_ID@test.local"
+USER_X="nobody-$RUN_ID@test.local"  # never signs up; used for 404 checks
 BASE=http://localhost:8080
 HYDRA=http://localhost:4444
 ADMIN=http://localhost:4445
@@ -57,10 +61,11 @@ r=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer garbage" "$
 check "garbage token -> 401" 401 "$r"
 
 echo "=== Phase 2: OAuth flow (user A) ==="
-A_TOKEN=$(token_of "foo@bar.com")
-[ "$A_TOKEN" != "null" ] && [ -n "$A_TOKEN" ] && echo "PASS: login A got token" || { echo "FAIL: login A: $(oauth_token foo@bar.com)"; exit 1; }
+A_TOKEN=$(token_of "$USER_A")
+[ "$A_TOKEN" != "null" ] && [ -n "$A_TOKEN" ] && echo "PASS: login A got token" || { echo "FAIL: login A: $(oauth_token "$USER_A")"; exit 1; }
 claims=$(echo "$A_TOKEN" | cut -d. -f2 | tr '_-' '/+' | awk '{l=length($0)%4; if(l==2)$0=$0"=="; else if(l==3)$0=$0"="; print}' | base64 -d 2>/dev/null | jq -r '.sub + " " + .iss + " " + .client_id')
-check "token sub/iss/client_id" "foo@bar.com http://localhost:4444 e2b-assignment" "$claims"
+check "token sub matches run user" "$USER_A" "$(echo "$claims" | awk '{print $1}')"
+check "token sub/iss/client_id" "$USER_A http://localhost:4444 e2b-assignment" "$claims"
 exp=$(echo "$A_TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq .exp); now=$(date +%s)
 [ "$exp" -gt "$now" ] && echo "PASS: token has future exp" || { echo "FAIL: exp=$exp now=$now"; FAILURES=$((FAILURES+1)); }
 AH="Authorization: Bearer $A_TOKEN"
@@ -88,20 +93,20 @@ r=$(curl -s -o /dev/null -w '%{http_code}' -H "$AH" "$BASE/v1/projects/00000000-
 check "unknown project -> 404" 404 "$r"
 body=$(curl -s -H "$AH" "$BASE/v1/projects?limit=1&offset=99999999999999")
 check_contains "huge offset clamped -> 200 not 500" '"total"' "$body"
-r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"email":"nobody@nowhere.io"}' "$BASE/v1/projects/$P1_ID/members")
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d "{\"email\":\"$USER_X\"}" "$BASE/v1/projects/$P1_ID/members")
 check "add unknown user -> 404" 404 "$r"
 
 echo "=== Phase 4: membership (user B) ==="
-B_TOKEN=$(token_of "bar@foo.com")
+B_TOKEN=$(token_of "$USER_B")
 [ "$B_TOKEN" != "null" ] && [ -n "$B_TOKEN" ] && echo "PASS: login B got token" || { echo "FAIL: login B"; exit 1; }
 BH="Authorization: Bearer $B_TOKEN"
 r=$(curl -s -o /dev/null -w '%{http_code}' -H "$BH" "$BASE/v1/projects/$P1_ID")
 check "non-member B get A's project -> 403" 403 "$r"
 r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$BH" -H 'Content-Type: application/json' -d '{"name":"x"}' "$BASE/v1/projects/$P1_ID/sandboxes")
 check "non-member B create sandbox -> 403" 403 "$r"
-r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"email":"bar@foo.com"}' "$BASE/v1/projects/$P1_ID/members")
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d "{\"email\":\"$USER_B\"}" "$BASE/v1/projects/$P1_ID/members")
 check "owner A adds B -> 200" 200 "$r"
-body=$(curl -s -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"email":"bar@foo.com"}' "$BASE/v1/projects/$P1_ID/members")
+body=$(curl -s -X POST -H "$AH" -H 'Content-Type: application/json' -d "{\"email\":\"$USER_B\"}" "$BASE/v1/projects/$P1_ID/members")
 check_contains "duplicate member -> 409" '"CONFLICT"' "$body"
 r=$(curl -s -o /dev/null -w '%{http_code}' -H "$BH" "$BASE/v1/projects/$P1_ID")
 check "member B get project -> 200" 200 "$r"

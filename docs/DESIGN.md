@@ -469,8 +469,9 @@ here.
 - **End-to-end**: the full browser flow (emulated over HTTP with Hydra's
   admin accept endpoints) plus the complete authz/lifecycle/limits matrix,
   exercised against the live stack via the shipped scripts
-  (`scripts/e2e.sh` — 34 checks; `scripts/quota_e2e.sh` — 16 plan-limit
-  checks, run after it on a fresh database). This is what caught the two
+  (`scripts/e2e.sh` — 36 checks; `scripts/quota_e2e.sh` — 18 plan-limit
+  checks; both use throwaway per-run users and are safe to re-run without
+  resetting the database). This is what caught the two
   bugs static review missed (empty-`Addr` random port binding; `aud`
   validation incompatible with Hydra's empty-audience tokens) and the
   restart-quota bypass found in final review.

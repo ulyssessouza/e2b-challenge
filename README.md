@@ -38,13 +38,12 @@ go run .                      # starts on :8080, runs migrations, logs in via de
 Log in at `http://localhost:8080/auth/login` (demo user `foo@bar.com` /
 `foobar`), then call the API with the returned access token.
 
-End-to-end suites (require a **fresh** database and a running server):
+End-to-end suites (require the running server; safe to re-run — each run
+uses throwaway users):
 
 ```sh
-mise run reset            # or: docker compose down -v && docker compose up -d --wait
-go run . &                # or: mise run dev
-scripts/e2e.sh            # 35 checks: OAuth flow, authz matrix, sandbox lifecycle
-scripts/quota_e2e.sh      # 16 checks: plan limits, slot freeing, restart-at-cap
+scripts/e2e.sh            # 36 checks: OAuth flow, authz matrix, sandbox lifecycle
+scripts/quota_e2e.sh      # 18 checks: plan limits, slot freeing, restart-at-cap
 ```
 
 Both scripts exit non-zero on failure. Design decisions and tradeoffs:
