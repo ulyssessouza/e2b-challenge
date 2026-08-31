@@ -49,6 +49,51 @@ scripts/quota_e2e.sh      # 18 checks: plan limits, slot freeing, restart-at-cap
 Both scripts exit non-zero on failure. Design decisions and tradeoffs:
 [`docs/DESIGN.md`](docs/DESIGN.md).
 
+## Usage examples (curl)
+
+Get a token first: open [`/auth/login`](http://localhost:8080/auth/login) in a
+browser, sign in with `foo@bar.com` / `foobar`, and copy the `access_token`
+from the JSON response. Then (examples use [jq](https://jqlang.github.io/jq/)):
+
+```sh
+export TOKEN=…   # the access_token you copied
+```
+
+### Happy path: create a project, add a sandbox, stop it
+
+```sh
+# Create a project → 201
+curl -s -X POST http://localhost:8080/v1/projects \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"demo"}'
+
+PROJECT_ID=$(curl -s http://localhost:8080/v1/projects \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.data[0].id')
+
+# Create a sandbox inside it → 201 (stopped_at: null means running)
+curl -s -X POST http://localhost:8080/v1/projects/$PROJECT_ID/sandboxes \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"my-sandbox"}'
+
+SANDBOX_ID=$(curl -s http://localhost:8080/v1/projects/$PROJECT_ID/sandboxes \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.data[0].id')
+
+# Stop it → 204
+curl -s -o /dev/null -w '%{http_code}\n' -X DELETE \
+  http://localhost:8080/v1/sandboxes/$SANDBOX_ID \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Conflict: stop it again → 409
+
+```sh
+curl -s -X DELETE http://localhost:8080/v1/sandboxes/$SANDBOX_ID \
+  -H "Authorization: Bearer $TOKEN"
+# {"code":"CONFLICT","message":"conflict: sandbox already stopped"}
+```
+
 ## What to Build
 
 Build a Go service that exposes:
