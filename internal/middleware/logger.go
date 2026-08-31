@@ -16,8 +16,11 @@ func RequestLogger() echo.MiddlewareFunc {
 			err := next(c)
 
 			if c.Path() != "/health" {
+				// Echo's RequestID middleware sets the id on the response
+				// header (and honors an inbound X-Request-ID), not on the
+				// context — read it after the handler has run.
 				slog.Info("request",
-					"request_id", c.Get(echo.HeaderXRequestID),
+					"request_id", c.Response().Header().Get(echo.HeaderXRequestID),
 					"method", c.Request().Method,
 					"path", c.Request().URL.Path,
 					"status", c.Response().Status,
