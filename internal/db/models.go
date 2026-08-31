@@ -33,9 +33,9 @@ type Sandbox struct {
 	ID        string
 	ProjectID string
 	UserID    string
+	Name      string
 	CreatedAt time.Time
 	StoppedAt sql.NullTime
-	Name      string
 }
 
 type User struct {

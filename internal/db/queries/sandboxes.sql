@@ -32,4 +32,4 @@ UPDATE sandboxes s SET stopped_at = NULL
 FROM project_users pu
 WHERE s.id = $1 AND s.stopped_at IS NOT NULL
   AND pu.project_id = s.project_id AND pu.user_id = $2
-RETURNING s.id, s.project_id, s.user_id, s.created_at, s.stopped_at, s.name;
+RETURNING s.id, s.project_id, s.user_id, s.name, s.created_at, s.stopped_at;

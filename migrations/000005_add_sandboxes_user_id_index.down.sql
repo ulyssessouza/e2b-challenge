@@ -1,1 +1,0 @@
-DROP INDEX IF EXISTS idx_sandboxes_user_id;

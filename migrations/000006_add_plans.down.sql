@@ -1,2 +1,0 @@
-ALTER TABLE users DROP COLUMN plan_id;
-DROP TABLE plans;

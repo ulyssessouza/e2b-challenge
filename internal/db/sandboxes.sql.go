@@ -42,7 +42,7 @@ func (q *Queries) CountSandboxesByProject(ctx context.Context, projectID string)
 }
 
 const createSandbox = `-- name: CreateSandbox :one
-INSERT INTO sandboxes (project_id, user_id, name) VALUES ($1, $2, $3) RETURNING id, project_id, user_id, created_at, stopped_at, name
+INSERT INTO sandboxes (project_id, user_id, name) VALUES ($1, $2, $3) RETURNING id, project_id, user_id, name, created_at, stopped_at
 `
 
 type CreateSandboxParams struct {
@@ -58,15 +58,15 @@ func (q *Queries) CreateSandbox(ctx context.Context, arg CreateSandboxParams) (S
 		&i.ID,
 		&i.ProjectID,
 		&i.UserID,
+		&i.Name,
 		&i.CreatedAt,
 		&i.StoppedAt,
-		&i.Name,
 	)
 	return i, err
 }
 
 const getSandboxByIDAndUser = `-- name: GetSandboxByIDAndUser :one
-SELECT s.id, s.project_id, s.user_id, s.created_at, s.stopped_at, s.name FROM sandboxes s
+SELECT s.id, s.project_id, s.user_id, s.name, s.created_at, s.stopped_at FROM sandboxes s
 JOIN project_users pu ON pu.project_id = s.project_id
 WHERE s.id = $1 AND pu.user_id = $2
 `
@@ -83,15 +83,15 @@ func (q *Queries) GetSandboxByIDAndUser(ctx context.Context, arg GetSandboxByIDA
 		&i.ID,
 		&i.ProjectID,
 		&i.UserID,
+		&i.Name,
 		&i.CreatedAt,
 		&i.StoppedAt,
-		&i.Name,
 	)
 	return i, err
 }
 
 const listSandboxesByProject = `-- name: ListSandboxesByProject :many
-SELECT id, project_id, user_id, created_at, stopped_at, name FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC, id DESC
+SELECT id, project_id, user_id, name, created_at, stopped_at FROM sandboxes WHERE project_id = $1 ORDER BY created_at DESC, id DESC
 LIMIT $2 OFFSET $3
 `
 
@@ -114,9 +114,9 @@ func (q *Queries) ListSandboxesByProject(ctx context.Context, arg ListSandboxesB
 			&i.ID,
 			&i.ProjectID,
 			&i.UserID,
+			&i.Name,
 			&i.CreatedAt,
 			&i.StoppedAt,
-			&i.Name,
 		); err != nil {
 			return nil, err
 		}
@@ -136,7 +136,7 @@ UPDATE sandboxes s SET stopped_at = NULL
 FROM project_users pu
 WHERE s.id = $1 AND s.stopped_at IS NOT NULL
   AND pu.project_id = s.project_id AND pu.user_id = $2
-RETURNING s.id, s.project_id, s.user_id, s.created_at, s.stopped_at, s.name
+RETURNING s.id, s.project_id, s.user_id, s.name, s.created_at, s.stopped_at
 `
 
 type RestartSandboxParams struct {
@@ -151,9 +151,9 @@ func (q *Queries) RestartSandbox(ctx context.Context, arg RestartSandboxParams) 
 		&i.ID,
 		&i.ProjectID,
 		&i.UserID,
+		&i.Name,
 		&i.CreatedAt,
 		&i.StoppedAt,
-		&i.Name,
 	)
 	return i, err
 }

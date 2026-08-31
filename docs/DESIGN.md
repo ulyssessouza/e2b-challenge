@@ -43,11 +43,14 @@ is where behavioral testing matters most.
 
 ## 3. Data model
 
-Migrations 000001–000006: `users`, `plans`, `projects`, `project_users`,
-`sandboxes`; indexes `idx_project_users_user_id`,
-`idx_sandboxes_project_created_at`, `idx_sandboxes_user_id`,
-`idx_sandboxes_user_running` (partial), `idx_sandboxes_project_name`
-(case-insensitive unique). All access through sqlc.
+A single migration (`000001_init`) creates the complete schema: `users`
+(with `plan_id`), `plans` (with the hobby/pro/ultimate seeds), `projects`,
+`project_users`, `sandboxes`, plus every index
+(`idx_project_users_user_id`, `idx_sandboxes_project_created_at`,
+`idx_sandboxes_user_id`, `idx_sandboxes_user_running` (partial),
+`idx_sandboxes_project_name`, the case-insensitive unique sandbox-name
+index). No evolution migrations remain — the schema is the schema. All
+access through sqlc.
 
 **sqlc over ORMs/raw SQL.** Hand-written SQL, type-checked at generation,
 query cost visible in review; cost: a `generate` step and no dynamic query
