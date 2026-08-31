@@ -118,6 +118,22 @@ S1=$(curl -s -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"s
 check_contains "create sandbox dto stopped_at null" '"stopped_at":null' "$S1"
 check_contains "sandbox snake_case fields" '"project_id"' "$S1"
 S1_ID=$(echo "$S1" | jq -r .id)
+
+echo "--- sandbox name rules (mandatory, unique per project) ---"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{}' "$BASE/v1/projects/$P1_ID/sandboxes")
+check "missing name -> 400" 400 "$r"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"   "}' "$BASE/v1/projects/$P1_ID/sandboxes")
+check "whitespace-only name -> 400" 400 "$r"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"sbx-1"}' "$BASE/v1/projects/$P1_ID/sandboxes")
+check "duplicate name same project -> 409" 409 "$r"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"SBX-1"}' "$BASE/v1/projects/$P1_ID/sandboxes")
+check "duplicate name case-insensitive -> 409" 409 "$r"
+PAD=$(curl -s -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"  pad  "}' "$BASE/v1/projects/$P1_ID/sandboxes")
+check "name trimmed on store" "pad" "$(echo "$PAD" | jq -r .name)"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"pad"}' "$BASE/v1/projects/$P1_ID/sandboxes")
+check "duplicate of trimmed name -> 409" 409 "$r"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"sbx-1"}' "$BASE/v1/projects/$P2_ID/sandboxes")
+check "same name other project -> 201 (per-project scoping)" 201 "$r"
 body=$(curl -s -X POST -H "$AH" -H 'Content-Type: application/json' -d "{\"sandbox_id\":\"$S1_ID\"}" "$BASE/v1/projects/$P1_ID/sandboxes")
 check_contains "restart running -> 200 no-op" '"stopped_at":null' "$body"
 r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d "{\"sandbox_id\":\"$S1_ID\"}" "$BASE/v1/projects/$P2_ID/sandboxes")

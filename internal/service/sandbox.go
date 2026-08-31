@@ -37,7 +37,12 @@ func (s *SandboxService) Create(ctx context.Context, projectID, userID, name, sa
 	})
 	if err != nil {
 		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23503" {
+		switch {
+		case errors.As(err, &pqErr) && pqErr.Code == errCodeUniqueViolation:
+			// The per-project, case-insensitive unique index rejected a
+			// duplicate sandbox name.
+			return nil, false, fmt.Errorf("%w: sandbox name %q already exists in this project", ErrConflict, name)
+		case errors.As(err, &pqErr) && pqErr.Code == errCodeForeignKeyViolation:
 			return nil, false, fmt.Errorf("%w: project", ErrNotFound)
 		}
 		return nil, false, fmt.Errorf("creating sandbox: %w", err)

@@ -64,7 +64,8 @@ strong opinion either way; the cost of the framework is low either way.
 Schema (migrations 000001–000006): `users`, `plans`, `projects`,
 `project_users`, `sandboxes` (indexes: `idx_project_users_user_id`,
 `idx_sandboxes_project_created_at`, `idx_sandboxes_user_id`,
-`idx_sandboxes_user_running`). All access through sqlc.
+`idx_sandboxes_user_running`, `idx_sandboxes_project_name` — the
+case-insensitive unique sandbox-name index). All access through sqlc.
 
 ### 3.1 sqlc over ORMs / raw SQL
 
@@ -378,7 +379,11 @@ distinguishes 201 (new resource) from 200 (state transition) honestly.
   `COUNT(*)`, unstable under concurrent inserts) — the keyset design that
   replaces it is written up in IMPROVEMENTS.md.
 - **Validation:** 1 MiB body limit globally (`BodyLimit("1M")`), names/emails
-  capped at 255 chars. Unbounded `TEXT` columns + unbounded bodies are an
+  capped at 255 chars. Sandbox names are mandatory (trimmed;
+  whitespace-only rejected) and **unique per project, case-insensitively**
+  (`UNIQUE (project_id, LOWER(name))`) — Postgres `23505` is translated to
+  `ErrConflict` → 409, so the race-free guarantee lives in the schema, not
+  in a check-then-lookup. Unbounded `TEXT` columns + unbounded bodies are an
   OOM lever; capping at the edge keeps the rule in one place.
 
 ### 8.3 Status codes

@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -44,8 +45,16 @@ func (h *SandboxHandler) Create(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
-	if len(req.Name) > maxNameLength {
-		return echo.NewHTTPError(http.StatusBadRequest, "name too long")
+	// Name rules apply to creation only; a restart (sandbox_id present) is a
+	// state transition on an existing sandbox and never writes a name.
+	if req.SandboxID == "" {
+		req.Name = strings.TrimSpace(req.Name)
+		if req.Name == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+		}
+		if len(req.Name) > maxNameLength {
+			return echo.NewHTTPError(http.StatusBadRequest, "name too long")
+		}
 	}
 
 	sandbox, created, err := h.svc.Create(c.Request().Context(), projectID, userID, req.Name, req.SandboxID)

@@ -138,9 +138,9 @@ func (s *ProjectService) AddMember(ctx context.Context, projectID, userEmail, ro
 	}); err != nil {
 		var pqErr *pq.Error
 		switch {
-		case errors.As(err, &pqErr) && pqErr.Code == "23505":
+		case errors.As(err, &pqErr) && pqErr.Code == errCodeUniqueViolation:
 			return nil, fmt.Errorf("%w: user is already a member of this project", ErrConflict)
-		case errors.As(err, &pqErr) && pqErr.Code == "23503":
+		case errors.As(err, &pqErr) && pqErr.Code == errCodeForeignKeyViolation:
 			return nil, fmt.Errorf("%w: project", ErrNotFound)
 		}
 		return nil, fmt.Errorf("adding member: %w", err)
