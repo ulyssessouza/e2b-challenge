@@ -129,5 +129,3 @@ solution.
   the tradeoffs against the alternatives considered
 - [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md) — deliberately unimplemented
   ideas and how they would be built
-- `docs/superpowers/` — historical planning artifacts from the build process
-  (superseded by DESIGN.md where they disagree)
