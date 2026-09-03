@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -48,6 +49,7 @@ func (h *ProjectHandler) Create(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 	}
+	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
@@ -60,6 +62,8 @@ func (h *ProjectHandler) Create(c echo.Context) error {
 		switch {
 		case errors.Is(err, service.ErrQuotaExceeded):
 			return echo.NewHTTPError(http.StatusForbidden, err.Error())
+		case errors.Is(err, service.ErrConflict):
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		default:
 			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}
@@ -102,7 +106,7 @@ func (h *ProjectHandler) AddMember(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "email too long")
 	}
 
-	user, err := h.svc.AddMember(c.Request().Context(), projectID, req.Email, "member")
+	user, err := h.svc.AddMember(c.Request().Context(), projectID, req.Email)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrNotFound):

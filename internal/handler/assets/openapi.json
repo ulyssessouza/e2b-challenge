@@ -5,64 +5,135 @@
     "description": "Multi-tenant control-plane API for sandboxes: OAuth2 login via Ory Hydra, JWT-authenticated projects and sandboxes, plan-based quotas.",
     "version": "1.0.0"
   },
-  "servers": [{ "url": "http://localhost:8080" }],
+  "servers": [
+    {
+      "url": "http://localhost:8080"
+    }
+  ],
   "components": {
     "securitySchemes": {
-      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
     },
     "schemas": {
       "Error": {
         "type": "object",
         "properties": {
-          "code": { "type": "string", "example": "CONFLICT" },
-          "message": { "type": "string", "example": "conflict: sandbox already stopped" }
+          "code": {
+            "type": "string",
+            "example": "CONFLICT"
+          },
+          "message": {
+            "type": "string",
+            "example": "conflict: sandbox already stopped"
+          }
         }
       },
       "Project": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
-          "name": { "type": "string" },
-          "created_at": { "type": "string", "format": "date-time" }
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "owner_id": {
+            "type": "string"
+          }
         }
       },
       "User": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
-          "email": { "type": "string" },
-          "name": { "type": "string" }
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
         }
       },
       "Sandbox": {
         "type": "object",
         "properties": {
-          "id": { "type": "string" },
-          "project_id": { "type": "string" },
-          "user_id": { "type": "string" },
-          "name": { "type": "string" },
-          "created_at": { "type": "string", "format": "date-time" },
-          "stopped_at": { "type": "string", "format": "date-time", "nullable": true }
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stopped_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
         }
       },
       "ProjectPage": {
         "type": "object",
         "properties": {
-          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Project" } },
-          "limit": { "type": "integer" },
-          "offset": { "type": "integer" },
-          "total": { "type": "integer" },
-          "total_pages": { "type": "integer" }
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Project"
+            }
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "total_pages": {
+            "type": "integer"
+          }
         }
       },
       "SandboxPage": {
         "type": "object",
         "properties": {
-          "data": { "type": "array", "items": { "$ref": "#/components/schemas/Sandbox" } },
-          "limit": { "type": "integer" },
-          "offset": { "type": "integer" },
-          "total": { "type": "integer" },
-          "total_pages": { "type": "integer" }
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Sandbox"
+            }
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "total_pages": {
+            "type": "integer"
+          }
         }
       }
     }
@@ -72,8 +143,12 @@
       "get": {
         "summary": "Liveness/readiness",
         "responses": {
-          "200": { "description": "All dependencies up (or only Redis degraded)" },
-          "503": { "description": "Database or auth dependency down" }
+          "200": {
+            "description": "All dependencies up (or only Redis degraded)"
+          },
+          "503": {
+            "description": "Database or auth dependency down"
+          }
         }
       }
     },
@@ -81,15 +156,31 @@
       "get": {
         "summary": "Start the OAuth2 authorization-code flow",
         "description": "Mints a single-use state cookie and redirects to Hydra's authorize page (demo user: foo@bar.com / foobar).",
-        "responses": { "302": { "description": "Redirect to Hydra" } }
+        "responses": {
+          "302": {
+            "description": "Redirect to Hydra"
+          }
+        }
       }
     },
     "/auth/callback": {
       "get": {
         "summary": "OAuth2 callback",
         "parameters": [
-          { "name": "code", "in": "query", "schema": { "type": "string" } },
-          { "name": "state", "in": "query", "schema": { "type": "string" } }
+          {
+            "name": "code",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -99,95 +190,310 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "access_token": { "type": "string" },
-                    "user_id": { "type": "string" },
-                    "email": { "type": "string" }
+                    "access_token": {
+                      "type": "string"
+                    },
+                    "user_id": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    }
                   }
                 }
               }
             }
           },
-          "400": { "description": "Invalid state or OAuth error redirect", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+          "400": {
+            "description": "Invalid state or OAuth error redirect",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/v1/projects": {
       "get": {
         "summary": "List the caller's projects",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 200 } },
-          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Paginated projects", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectPage" } } } },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "200": {
+            "description": "Paginated projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
         }
       },
       "post": {
         "summary": "Create a project (caller becomes its owner)",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string", "maxLength": 255 } } } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 255
+                  }
+                }
+              }
+            }
+          }
         },
         "responses": {
-          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Project" } } } },
-          "403": { "description": "Plan quota exceeded (owned projects)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
-        }
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Plan quota exceeded (owned projects)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "Duplicate project name for this owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Project names are mandatory (trimmed) and unique per owner, case-insensitively. Subject to the plan's owned-projects quota."
       }
     },
     "/v1/projects/{id}": {
       "get": {
         "summary": "Get a project (members only)",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
-          "200": { "description": "The project", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Project" } } } },
-          "403": { "description": "Not a member" },
-          "404": { "description": "Unknown project" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "200": {
+            "description": "The project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member"
+          },
+          "404": {
+            "description": "Unknown project"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
         }
       }
     },
     "/v1/projects/{id}/members": {
       "post": {
         "summary": "Add a user to the project by email (owner only)",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "required": ["email"], "properties": { "email": { "type": "string" } } } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "Membership created; the added user", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } } },
-          "403": { "description": "Caller is not the project owner" },
-          "404": { "description": "Unknown user or project" },
-          "409": { "description": "Already a member" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "200": {
+            "description": "Membership created; the added user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not the project owner"
+          },
+          "404": {
+            "description": "Unknown user or project"
+          },
+          "409": {
+            "description": "Already a member"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
         }
       }
     },
     "/v1/projects/{id}/sandboxes": {
       "get": {
         "summary": "List the project's sandboxes",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 200 } },
-          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Paginated sandboxes", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SandboxPage" } } } },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "200": {
+            "description": "Paginated sandboxes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
         }
       },
       "post": {
-        "summary": "Create a sandbox — or restart one when sandbox_id is present",
+        "summary": "Create a sandbox \u2014 or restart one when sandbox_id is present",
         "description": "Names are mandatory (trimmed) and unique per project, case-insensitively. The restart path takes only sandbox_id and never changes the name. Both paths are subject to the plan's running-sandbox quota.",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -195,34 +501,95 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string", "maxLength": 255, "description": "Required when creating; ignored when restarting" },
-                  "sandbox_id": { "type": "string", "description": "Presence switches the call to a restart of that sandbox" }
+                  "name": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "description": "Required when creating; ignored when restarting"
+                  },
+                  "sandbox_id": {
+                    "type": "string",
+                    "description": "Presence switches the call to a restart of that sandbox"
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": { "description": "Sandbox created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Sandbox" } } } },
-          "200": { "description": "Sandbox restarted (or already running)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Sandbox" } } } },
-          "403": { "description": "Plan quota exceeded (running sandboxes)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
-          "404": { "description": "Sandbox or project unknown / not visible to the caller" },
-          "409": { "description": "Duplicate sandbox name in this project" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "201": {
+            "description": "Sandbox created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sandbox"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Sandbox restarted (or already running)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sandbox"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Plan quota exceeded (running sandboxes)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Sandbox or project unknown / not visible to the caller"
+          },
+          "409": {
+            "description": "Duplicate sandbox name in this project"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
         }
       }
     },
     "/v1/sandboxes/{id}": {
       "delete": {
         "summary": "Stop a sandbox",
-        "description": "Membership is enforced inside the query — non-members get 404 with no existence leak.",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "description": "Membership is enforced inside the query \u2014 non-members get 404 with no existence leak.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
-          "204": { "description": "Stopped" },
-          "404": { "description": "Unknown or foreign sandbox" },
-          "409": { "description": "Already stopped" },
-          "401": { "$ref": "#/components/responses/Unauthorized" }
+          "204": {
+            "description": "Stopped"
+          },
+          "404": {
+            "description": "Unknown or foreign sandbox"
+          },
+          "409": {
+            "description": "Already stopped"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
         }
       }
     }
@@ -230,7 +597,13 @@
   "responses": {
     "Unauthorized": {
       "description": "Missing/invalid bearer token",
-      "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      "content": {
+        "application/json": {
+          "schema": {
+            "$ref": "#/components/schemas/Error"
+          }
+        }
+      }
     }
   }
 }

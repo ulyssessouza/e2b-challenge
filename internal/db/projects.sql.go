@@ -10,19 +10,25 @@ import (
 	"database/sql"
 )
 
-const addProjectMember = `-- name: AddProjectMember :exec
-INSERT INTO project_users (project_id, user_id, role) VALUES ($1, $2, $3)
+const countProjectsByOwner = `-- name: CountProjectsByOwner :one
+SELECT COUNT(*) FROM (
+    SELECT 1 FROM projects
+    WHERE owner_id = $1
+    LIMIT $2
+) owned
 `
 
-type AddProjectMemberParams struct {
-	ProjectID string
-	UserID    string
-	Role      string
+type CountProjectsByOwnerParams struct {
+	OwnerID string
+	Limit   int32
 }
 
-func (q *Queries) AddProjectMember(ctx context.Context, arg AddProjectMemberParams) error {
-	_, err := q.db.ExecContext(ctx, addProjectMember, arg.ProjectID, arg.UserID, arg.Role)
-	return err
+// The LIMIT caps the scan at the plan cap (see CountRunningSandboxesByUser).
+func (q *Queries) CountProjectsByOwner(ctx context.Context, arg CountProjectsByOwnerParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countProjectsByOwner, arg.OwnerID, arg.Limit)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countProjectsByUser = `-- name: CountProjectsByUser :one
@@ -39,47 +45,87 @@ func (q *Queries) CountProjectsByUser(ctx context.Context, userID string) (int64
 }
 
 const createProject = `-- name: CreateProject :one
-INSERT INTO projects (name) VALUES ($1) RETURNING id, name, created_at
+INSERT INTO projects (owner_id, name) VALUES ($1, $2) RETURNING id, owner_id, name, created_at
 `
 
-func (q *Queries) CreateProject(ctx context.Context, name string) (Project, error) {
-	row := q.db.QueryRowContext(ctx, createProject, name)
+type CreateProjectParams struct {
+	OwnerID string
+	Name    string
+}
+
+func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
+	row := q.db.QueryRowContext(ctx, createProject, arg.OwnerID, arg.Name)
 	var i Project
-	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.Name,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 
+const createProjectMember = `-- name: CreateProjectMember :exec
+INSERT INTO project_users (project_id, user_id) VALUES ($1, $2)
+`
+
+type CreateProjectMemberParams struct {
+	ProjectID string
+	UserID    string
+}
+
+func (q *Queries) CreateProjectMember(ctx context.Context, arg CreateProjectMemberParams) error {
+	_, err := q.db.ExecContext(ctx, createProjectMember, arg.ProjectID, arg.UserID)
+	return err
+}
+
 const getProjectByID = `-- name: GetProjectByID :one
-SELECT id, name, created_at FROM projects WHERE id = $1 LIMIT 1
+SELECT id, owner_id, name, created_at FROM projects WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetProjectByID(ctx context.Context, id string) (Project, error) {
 	row := q.db.QueryRowContext(ctx, getProjectByID, id)
 	var i Project
-	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerID,
+		&i.Name,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 
 const getProjectMembership = `-- name: GetProjectMembership :one
-SELECT pu.role FROM projects p
-LEFT JOIN project_users pu ON pu.project_id = p.id AND pu.user_id = $2
-WHERE p.id = $1
+SELECT pu.user_id AS member_user_id,
+       (p.owner_id = $1)::bool AS is_owner
+FROM projects p
+LEFT JOIN project_users pu ON pu.project_id = p.id AND pu.user_id = $1
+WHERE p.id = $2
 `
 
 type GetProjectMembershipParams struct {
-	ID     string
-	UserID string
+	CallerID  string
+	ProjectID string
 }
 
-func (q *Queries) GetProjectMembership(ctx context.Context, arg GetProjectMembershipParams) (sql.NullString, error) {
-	row := q.db.QueryRowContext(ctx, getProjectMembership, arg.ID, arg.UserID)
-	var role sql.NullString
-	err := row.Scan(&role)
-	return role, err
+type GetProjectMembershipRow struct {
+	MemberUserID sql.NullString
+	IsOwner      bool
+}
+
+// One round-trip answers both authorization questions: does the project
+// exist, and what is the caller's derived role (ownership is an attribute
+// of the project; project_users is the access list). member_user_id is
+// NULL when the caller is not a member.
+func (q *Queries) GetProjectMembership(ctx context.Context, arg GetProjectMembershipParams) (GetProjectMembershipRow, error) {
+	row := q.db.QueryRowContext(ctx, getProjectMembership, arg.CallerID, arg.ProjectID)
+	var i GetProjectMembershipRow
+	err := row.Scan(&i.MemberUserID, &i.IsOwner)
+	return i, err
 }
 
 const listProjectsByUser = `-- name: ListProjectsByUser :many
-SELECT p.id, p.name, p.created_at FROM projects p
+SELECT p.id, p.owner_id, p.name, p.created_at FROM projects p
 JOIN project_users pu ON pu.project_id = p.id
 WHERE pu.user_id = $1
 ORDER BY p.created_at DESC, p.id DESC
@@ -101,7 +147,12 @@ func (q *Queries) ListProjectsByUser(ctx context.Context, arg ListProjectsByUser
 	var items []Project
 	for rows.Next() {
 		var i Project
-		if err := rows.Scan(&i.ID, &i.Name, &i.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerID,
+			&i.Name,
+			&i.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

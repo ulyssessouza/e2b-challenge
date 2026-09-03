@@ -13,12 +13,23 @@ import (
 )
 
 type stubMembershipChecker struct {
-	role sql.NullString
-	err  error
+	member bool
+	owner  bool
+	noRows bool
+	err    error
 }
 
-func (s stubMembershipChecker) GetProjectMembership(_ context.Context, _ db.GetProjectMembershipParams) (sql.NullString, error) {
-	return s.role, s.err
+func (s stubMembershipChecker) GetProjectMembership(_ context.Context, _ db.GetProjectMembershipParams) (db.GetProjectMembershipRow, error) {
+	if s.err != nil {
+		return db.GetProjectMembershipRow{}, s.err
+	}
+	if s.noRows {
+		return db.GetProjectMembershipRow{}, sql.ErrNoRows
+	}
+	return db.GetProjectMembershipRow{
+		MemberUserID: sql.NullString{String: "u", Valid: s.member},
+		IsOwner:      s.owner,
+	}, nil
 }
 
 func doProjectMembership(t *testing.T, q MembershipChecker, userID string) *echo.HTTPError {
@@ -52,28 +63,35 @@ func doProjectMembership(t *testing.T, q MembershipChecker, userID string) *echo
 }
 
 func TestProjectMembershipAllowsMember(t *testing.T) {
-	he := doProjectMembership(t, stubMembershipChecker{role: sql.NullString{String: "member", Valid: true}}, "user-1")
+	he := doProjectMembership(t, stubMembershipChecker{member: true}, "user-1")
 	if he != nil {
 		t.Fatalf("expected member to pass, got %+v", he)
 	}
 }
 
 func TestProjectMembershipRejectsNonMember(t *testing.T) {
-	he := doProjectMembership(t, stubMembershipChecker{role: sql.NullString{}}, "user-2")
+	he := doProjectMembership(t, stubMembershipChecker{}, "user-2")
 	if he == nil || he.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for non-member, got %+v", he)
 	}
 }
 
 func TestProjectMembershipRejectsMissingProject(t *testing.T) {
-	he := doProjectMembership(t, stubMembershipChecker{err: sql.ErrNoRows}, "user-1")
+	he := doProjectMembership(t, stubMembershipChecker{noRows: true}, "user-1")
 	if he == nil || he.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for missing project, got %+v", he)
 	}
 }
 
+func TestProjectMembershipAllowsOwner(t *testing.T) {
+	he := doProjectMembership(t, stubMembershipChecker{member: true, owner: true}, "user-1")
+	if he != nil {
+		t.Fatalf("expected owner to pass, got %+v", he)
+	}
+}
+
 func TestProjectMembershipRejectsUnauthenticated(t *testing.T) {
-	he := doProjectMembership(t, stubMembershipChecker{role: sql.NullString{String: "member", Valid: true}}, "")
+	he := doProjectMembership(t, stubMembershipChecker{member: true}, "")
 	if he == nil || he.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 when user ID missing from context, got %+v", he)
 	}

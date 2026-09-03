@@ -11,6 +11,7 @@ import (
 
 type ProjectDTO struct {
 	ID        string    `json:"id"`
+	OwnerID   string    `json:"owner_id"`
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -31,7 +32,7 @@ type UserDTO struct {
 }
 
 func toProjectDTO(p db.Project) ProjectDTO {
-	return ProjectDTO{ID: p.ID, Name: p.Name, CreatedAt: p.CreatedAt}
+	return ProjectDTO{ID: p.ID, OwnerID: p.OwnerID, Name: p.Name, CreatedAt: p.CreatedAt}
 }
 
 func toProjectDTOs(projects []db.Project) []ProjectDTO {

@@ -9,29 +9,6 @@ import (
 	"context"
 )
 
-const countProjectsOwnedByUser = `-- name: CountProjectsOwnedByUser :one
-SELECT COUNT(*) FROM (
-    SELECT 1 FROM project_users
-    WHERE user_id = $1 AND role = 'owner'
-    LIMIT $2
-) owned
-`
-
-type CountProjectsOwnedByUserParams struct {
-	UserID string
-	Limit  int32
-}
-
-// The LIMIT caps the scan: the caller only needs to know whether the count
-// reached the plan cap, so the cost stays bounded however many projects a
-// user owns.
-func (q *Queries) CountProjectsOwnedByUser(ctx context.Context, arg CountProjectsOwnedByUserParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, countProjectsOwnedByUser, arg.UserID, arg.Limit)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const getUserPlan = `-- name: GetUserPlan :one
 SELECT p.id, p.name, p.max_projects, p.max_running_sandboxes, p.created_at
 FROM users u

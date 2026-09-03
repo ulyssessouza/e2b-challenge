@@ -21,20 +21,24 @@ CREATE TABLE users (
 
 CREATE TABLE projects (
     id         TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    owner_id   TEXT NOT NULL REFERENCES users(id),
     name       TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Project names are unique per OWNER, case-insensitively: "API" and "api"
+-- are the same name, and two owners may each have their own "demo".
+CREATE UNIQUE INDEX idx_projects_owner_name ON projects (owner_id, LOWER(name));
+
 CREATE TABLE project_users (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role       TEXT NOT NULL DEFAULT 'member'
-        CHECK (role IN ('owner', 'member')),
     PRIMARY KEY (project_id, user_id)
 );
 
--- project_users PK is (project_id, user_id); user-scoped lookups need the
--- reverse ordering to avoid sequential scans when listing a user's projects.
+-- project_users is the access list; ownership lives on projects.owner_id.
+-- The PK is (project_id, user_id); user-scoped lookups need the reverse
+-- ordering to avoid sequential scans when listing a user's projects.
 CREATE INDEX idx_project_users_user_id ON project_users (user_id, project_id);
 
 CREATE TABLE sandboxes (
@@ -48,6 +52,10 @@ CREATE TABLE sandboxes (
 
 -- State is the presence of stopped_at: NULL means running (no status column).
 
+-- Sandbox names are mandatory (enforced at the API) and unique per project,
+-- case-insensitively: "API" and "api" are the same name.
+CREATE UNIQUE INDEX idx_sandboxes_project_name ON sandboxes (project_id, LOWER(name));
+
 -- Sandboxes are always listed/counted per project and ordered by creation time.
 CREATE INDEX idx_sandboxes_project_created_at ON sandboxes (project_id, created_at DESC);
 
@@ -57,7 +65,3 @@ CREATE INDEX idx_sandboxes_user_running ON sandboxes (user_id) WHERE stopped_at 
 
 -- Any user-scoped sandbox query or user deletion would otherwise sequentially scan.
 CREATE INDEX idx_sandboxes_user_id ON sandboxes (user_id);
-
--- Sandbox names are mandatory (enforced at the API) and unique per project,
--- case-insensitively: "API" and "api" are the same name.
-CREATE UNIQUE INDEX idx_sandboxes_project_name ON sandboxes (project_id, LOWER(name));

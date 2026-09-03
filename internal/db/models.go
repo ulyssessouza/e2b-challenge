@@ -19,6 +19,7 @@ type Plan struct {
 
 type Project struct {
 	ID        string
+	OwnerID   string
 	Name      string
 	CreatedAt time.Time
 }
@@ -26,7 +27,6 @@ type Project struct {
 type ProjectUser struct {
 	ProjectID string
 	UserID    string
-	Role      string
 }
 
 type Sandbox struct {

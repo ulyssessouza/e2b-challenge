@@ -11,10 +11,11 @@ import (
 	"e2b-challenge/internal/db"
 )
 
-// MembershipChecker resolves whether a user is a member of a project. A nil
-// role (Valid == false) means the project exists but the user is not a member.
+// MembershipChecker resolves the caller's relationship to a project in a
+// single round-trip: whether the project exists, and whether the caller is
+// a member (owners are members too — role is derived from projects.owner_id).
 type MembershipChecker interface {
-	GetProjectMembership(ctx context.Context, arg db.GetProjectMembershipParams) (sql.NullString, error)
+	GetProjectMembership(ctx context.Context, arg db.GetProjectMembershipParams) (db.GetProjectMembershipRow, error)
 }
 
 func ProjectMembership(q MembershipChecker) echo.MiddlewareFunc {
@@ -26,9 +27,9 @@ func ProjectMembership(q MembershipChecker) echo.MiddlewareFunc {
 				return echo.NewHTTPError(http.StatusUnauthorized, "user not authenticated")
 			}
 
-			role, err := q.GetProjectMembership(c.Request().Context(), db.GetProjectMembershipParams{
-				ID:     projectID,
-				UserID: userID,
+			membership, err := q.GetProjectMembership(c.Request().Context(), db.GetProjectMembershipParams{
+				CallerID:  userID,
+				ProjectID: projectID,
 			})
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
@@ -36,11 +37,15 @@ func ProjectMembership(q MembershipChecker) echo.MiddlewareFunc {
 				}
 				return echo.NewHTTPError(http.StatusInternalServerError, "database error")
 			}
-			if !role.Valid {
+			if !membership.MemberUserID.Valid {
 				return echo.NewHTTPError(http.StatusForbidden, "not a member of this project")
 			}
 
-			c.Set(ContextProjectRole, role.String)
+			role := "member"
+			if membership.IsOwner {
+				role = "owner"
+			}
+			c.Set(ContextProjectRole, role)
 
 			return next(c)
 		}

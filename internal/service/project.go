@@ -38,15 +38,23 @@ func (s *ProjectService) Create(ctx context.Context, name, ownerID string) (*db.
 
 	qtx := s.q.WithTx(tx)
 
-	project, err := qtx.CreateProject(ctx, name)
+	project, err := qtx.CreateProject(ctx, db.CreateProjectParams{
+		OwnerID: ownerID,
+		Name:    name,
+	})
 	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == errCodeUniqueViolation {
+			return nil, fmt.Errorf("%w: you already have a project named %q", ErrConflict, name)
+		}
 		return nil, fmt.Errorf("creating project: %w", err)
 	}
 
-	if err := qtx.AddProjectMember(ctx, db.AddProjectMemberParams{
+	// The owner is a member too — project_users is the access list,
+	// projects.owner_id carries the ownership.
+	if err := qtx.CreateProjectMember(ctx, db.CreateProjectMemberParams{
 		ProjectID: project.ID,
 		UserID:    ownerID,
-		Role:      "owner",
 	}); err != nil {
 		return nil, fmt.Errorf("adding owner: %w", err)
 	}
@@ -70,9 +78,9 @@ func (s *ProjectService) planUsage(ctx context.Context, ownerID string) (db.Plan
 	if plan.MaxProjects <= 0 {
 		return plan, 0, nil // unlimited
 	}
-	owned, err := s.q.CountProjectsOwnedByUser(ctx, db.CountProjectsOwnedByUserParams{
-		UserID: ownerID,
-		Limit:  plan.MaxProjects,
+	owned, err := s.q.CountProjectsByOwner(ctx, db.CountProjectsByOwnerParams{
+		OwnerID: ownerID,
+		Limit:   plan.MaxProjects,
 	})
 	if err != nil {
 		return db.Plan{}, 0, fmt.Errorf("counting owned projects: %w", err)
@@ -112,7 +120,7 @@ func (s *ProjectService) GetByID(ctx context.Context, id string) (*db.Project, e
 	return &project, nil
 }
 
-func (s *ProjectService) AddMember(ctx context.Context, projectID, userEmail, role string) (*db.User, error) {
+func (s *ProjectService) AddMember(ctx context.Context, projectID, userEmail string) (*db.User, error) {
 	// Transaction so the user cannot be deleted between the lookup and the
 	// membership insert (which would surface as a raw FK violation).
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -131,10 +139,9 @@ func (s *ProjectService) AddMember(ctx context.Context, projectID, userEmail, ro
 		return nil, fmt.Errorf("looking up user: %w", err)
 	}
 
-	if err := qtx.AddProjectMember(ctx, db.AddProjectMemberParams{
+	if err := qtx.CreateProjectMember(ctx, db.CreateProjectMemberParams{
 		ProjectID: projectID,
 		UserID:    user.ID,
-		Role:      role,
 	}); err != nil {
 		var pqErr *pq.Error
 		switch {

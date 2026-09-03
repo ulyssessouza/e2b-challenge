@@ -87,6 +87,20 @@ if echo "$P1" | grep -q '"Name"'; then echo "FAIL: PascalCase leak in project DT
 P1_ID=$(echo "$P1" | jq -r .id)
 P2_ID=$(curl -s -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"project-two"}' "$BASE/v1/projects" | jq -r .id)
 [ -n "$P1_ID" ] && [ -n "$P2_ID" ] && echo "PASS: two projects created" || { echo "FAIL: project ids"; exit 1; }
+
+echo "--- project name rules (mandatory, unique per owner) ---"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{}' "$BASE/v1/projects")
+check "missing project name -> 400" 400 "$r"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"   "}' "$BASE/v1/projects")
+check "whitespace-only project name -> 400" 400 "$r"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"project-one"}' "$BASE/v1/projects")
+check "duplicate project name -> 409" 409 "$r"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"PROJECT-ONE"}' "$BASE/v1/projects")
+check "duplicate project name case-insensitive -> 409" 409 "$r"
+PADP=$(curl -s -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"  padded-proj  "}' "$BASE/v1/projects")
+check "project name trimmed on store" "padded-proj" "$(echo "$PADP" | jq -r .name)"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"padded-proj"}' "$BASE/v1/projects")
+check "duplicate of trimmed project name -> 409" 409 "$r"
 body=$(curl -s -H "$AH" "$BASE/v1/projects/$P1_ID")
 check_contains "get project dto" '"name":"project-one"' "$body"
 r=$(curl -s -o /dev/null -w '%{http_code}' -H "$AH" "$BASE/v1/projects/00000000-0000-0000-0000-000000000000")
@@ -112,6 +126,8 @@ r=$(curl -s -o /dev/null -w '%{http_code}' -H "$BH" "$BASE/v1/projects/$P1_ID")
 check "member B get project -> 200" 200 "$r"
 r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$BH" -H 'Content-Type: application/json' -d '{"email":"someone@else.io"}' "$BASE/v1/projects/$P1_ID/members")
 check "member B (not owner) add member -> 403" 403 "$r"
+r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "$BH" -H 'Content-Type: application/json' -d '{"name":"project-one"}' "$BASE/v1/projects")
+check "B creates own project with same name -> 201 (per-owner scoping)" 201 "$r"
 
 echo "=== Phase 5: sandbox lifecycle ==="
 S1=$(curl -s -X POST -H "$AH" -H 'Content-Type: application/json' -d '{"name":"sbx-1"}' "$BASE/v1/projects/$P1_ID/sandboxes")

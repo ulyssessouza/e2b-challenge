@@ -69,14 +69,22 @@ dedicated `oauth_sub` column — is the first Identity item in
 IMPROVEMENTS.md (an earlier implementation carried the column; removed as
 machinery the fixture doesn't need).
 
-### 3.2 `project_users`: composite PK + owner-only member addition
+### 3.2 `project_users` is the access list; ownership is an attribute
 
-`(project_id, user_id)` PK makes "one membership per pair" a database fact;
-`role CHECK IN ('owner','member')` keeps roles closed-set; reverse index
-`idx_project_users_user_id (user_id, project_id)` serves user→projects
-queries. **Roles are data and only owners add members** (the design spec's
-`JWT + Owner` contract) — otherwise `role` is dead schema and "add your
-friends" is a privilege-escalation foot-gun.
+`projects.owner_id` carries ownership; `project_users (project_id, user_id)`
+is purely the access list — no `role` column, which would duplicate the
+owner fact and invite drift. The composite PK makes "one membership per
+pair" a database fact; reverse index `idx_project_users_user_id
+(user_id, project_id)` serves user→projects queries. **Only owners add
+members** (the design spec's `JWT + Owner` contract): the membership
+middleware derives the role in the same single `LEFT JOIN` that checks
+existence — `p.owner_id = caller` → owner, else member — and "add your
+friends" would otherwise be a privilege-escalation foot-gun.
+
+**Project names are unique per owner, case-insensitively**
+(`idx_projects_owner_name (owner_id, LOWER(name))`) — two users may each
+own a `demo`, one user cannot. Enforced by the database (`23505` →
+`ErrConflict` → 409), same as sandbox names.
 
 ### 3.3 Sandbox state: `stopped_at`, no status column
 
@@ -203,7 +211,8 @@ running sandboxes, `pro` 25/20, `ultimate` 0 = unlimited) attached per user
   `stopped_at IS NULL`), across all projects.
 
 **Enforcement** (check-then-create; 403 naming the plan and the limit):
-sandbox `Create` *and* `Restart`, project `Create`. Restart is
+sandbox `Create` *and* `Restart`, project `Create` — owned projects
+counted via `projects.owner_id`. Restart is
 quota-checked because a stopped sandbox does not count — restarting is
 growth whenever new sandboxes were created since the stop; exempting it let
 the running count exceed the cap without bound (found in review). The check
